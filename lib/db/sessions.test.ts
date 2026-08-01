@@ -3,6 +3,7 @@ import {
   createSession,
   getSessionById,
   updateSessionStatus,
+  updateSessionFormat,
   markSessionCompleted,
   deleteSession,
 } from "@/lib/db/sessions";
@@ -43,5 +44,22 @@ describe("lib/db/sessions (integration, live local Supabase)", () => {
 
     const afterDelete = await getSessionById(created.id);
     expect(afterDelete).toBeNull();
+  });
+
+  it("upgrades a session's format from 3 to 4, and can be set back to 3", async () => {
+    const created = await createSession({ mode: "invite", hostUserId: null });
+    createdId = created.id;
+
+    expect(created.format).toBe("3");
+
+    const upgraded = await updateSessionFormat(created.id, "4");
+    expect(upgraded.id).toBe(created.id);
+    expect(upgraded.format).toBe("4");
+
+    const persisted = await getSessionById(created.id);
+    expect(persisted?.format).toBe("4");
+
+    const reverted = await updateSessionFormat(created.id, "3");
+    expect(reverted.format).toBe("3");
   });
 });
