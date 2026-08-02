@@ -3,9 +3,11 @@ import {
   createSession,
   getSessionById,
   updateSessionStatus,
+  updateSessionFormat,
   markSessionCompleted,
   deleteSession,
 } from "@/lib/db/sessions";
+import { createServiceRoleClient } from "@/lib/supabase/server";
 
 describe("lib/db/sessions (integration, live local Supabase)", () => {
   let createdId: string | null = null;
@@ -43,5 +45,48 @@ describe("lib/db/sessions (integration, live local Supabase)", () => {
 
     const afterDelete = await getSessionById(created.id);
     expect(afterDelete).toBeNull();
+  });
+
+  it("upgrades a session's format from 3 to 4, and can be set back to 3", async () => {
+    const created = await createSession({ mode: "invite", hostUserId: null });
+    createdId = created.id;
+
+    expect(created.format).toBe("3");
+
+    const upgraded = await updateSessionFormat(created.id, "4");
+    expect(upgraded.id).toBe(created.id);
+    expect(upgraded.format).toBe("4");
+
+    const persisted = await getSessionById(created.id);
+    expect(persisted?.format).toBe("4");
+
+    const reverted = await updateSessionFormat(created.id, "3");
+    expect(reverted.format).toBe("3");
+  });
+
+  it("stores a non-null host_user_id when the creator is a known app_users row", async () => {
+    const supabase = createServiceRoleClient();
+    const clerkId = `clerk_test_${crypto.randomUUID()}`;
+    const { data: appUser, error: appUserError } = await supabase
+      .from("app_users")
+      .insert({ clerk_id: clerkId })
+      .select()
+      .single();
+    if (appUserError) throw new Error(appUserError.message);
+
+    try {
+      const created = await createSession({
+        mode: "solo",
+        hostUserId: appUser.id,
+      });
+      createdId = created.id;
+
+      expect(created.host_user_id).toBe(appUser.id);
+
+      const persisted = await getSessionById(created.id);
+      expect(persisted?.host_user_id).toBe(appUser.id);
+    } finally {
+      await supabase.from("app_users").delete().eq("id", appUser.id);
+    }
   });
 });

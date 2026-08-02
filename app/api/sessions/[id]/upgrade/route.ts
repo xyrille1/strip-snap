@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { sessionIdParamSchema } from "@/lib/validation/session";
 import { getOrCreateByClerkId } from "@/lib/db/appUsers";
+import { getParticipantByUserAndSession } from "@/lib/db/participants";
 import { getSessionById, updateSessionFormat } from "@/lib/db/sessions";
 
 /**
@@ -13,6 +14,11 @@ import { getSessionById, updateSessionFormat } from "@/lib/db/sessions";
  * client-supplied user id (backend-schema §5). No redirect on missing auth:
  * F-21/F-22 require an inline sign-in prompt mid-flow, so this returns a
  * plain 401 JSON body for the client to react to.
+ *
+ * Being authenticated is not sufficient on its own — the acting user must
+ * also be a participant of *this* session, otherwise any logged-in user
+ * could upgrade a session they were never invited to. That check returns
+ * 403 (authenticated but not authorized), distinct from the 401 above.
  */
 export async function POST(
   request: NextRequest,
@@ -41,7 +47,18 @@ export async function POST(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  await getOrCreateByClerkId(userId);
+  const appUser = await getOrCreateByClerkId(userId);
+
+  const participant = await getParticipantByUserAndSession(
+    parsed.data.id,
+    appUser.id
+  );
+  if (!participant) {
+    return NextResponse.json(
+      { error: "You must be a participant of this session to upgrade it" },
+      { status: 403 }
+    );
+  }
 
   const session = await updateSessionFormat(parsed.data.id, "4");
 
