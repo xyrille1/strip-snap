@@ -58,8 +58,10 @@ describe("createStripSchema", () => {
   });
 
   it("rejects a missing stylePreset", () => {
-    const { stylePreset: _stylePreset, ...rest } = validBody;
-    const result = createStripSchema.safeParse(rest);
+    const result = createStripSchema.safeParse({
+      ...validBody,
+      stylePreset: undefined,
+    });
     expect(result.success).toBe(false);
   });
 
@@ -69,14 +71,18 @@ describe("createStripSchema", () => {
   });
 
   it("rejects a missing format", () => {
-    const { format: _format, ...rest } = validBody;
-    const result = createStripSchema.safeParse(rest);
+    const result = createStripSchema.safeParse({
+      ...validBody,
+      format: undefined,
+    });
     expect(result.success).toBe(false);
   });
 
   it("rejects a missing imageDataUrl", () => {
-    const { imageDataUrl: _imageDataUrl, ...rest } = validBody;
-    const result = createStripSchema.safeParse(rest);
+    const result = createStripSchema.safeParse({
+      ...validBody,
+      imageDataUrl: undefined,
+    });
     expect(result.success).toBe(false);
   });
 
