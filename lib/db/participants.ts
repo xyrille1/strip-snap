@@ -3,6 +3,23 @@ import type { Database } from "@/lib/supabase/types";
 
 type ParticipantRow = Database["public"]["Tables"]["participants"]["Row"];
 
+/** Postgres unique-violation error code (backend-schema §3.3's `unique (session_id, user_id)`). */
+const POSTGRES_UNIQUE_VIOLATION = "23505";
+
+/**
+ * Thrown by `addParticipant` when the insert collides with the
+ * `unique (session_id, user_id)` constraint — i.e. a logged-in user trying
+ * to join a session they already have a participant row in. Anonymous
+ * participants (`user_id: null`) can never trigger this (backend-schema
+ * §3.3 — Postgres treats null as distinct in unique constraints).
+ */
+export class UniqueParticipantError extends Error {
+  constructor() {
+    super("A participant row for this session_id/user_id already exists");
+    this.name = "UniqueParticipantError";
+  }
+}
+
 export async function addParticipant(input: {
   sessionId: string;
   userId: string | null;
@@ -19,7 +36,12 @@ export async function addParticipant(input: {
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === POSTGRES_UNIQUE_VIOLATION) {
+      throw new UniqueParticipantError();
+    }
+    throw new Error(error.message);
+  }
   return data;
 }
 
