@@ -4,6 +4,16 @@ import type { Database } from "@/lib/supabase/types";
 type StripRow = Database["public"]["Tables"]["strips"]["Row"];
 
 export async function createStrip(input: {
+  /**
+   * Optional — lets the caller pre-generate the strip's id (e.g. via
+   * `crypto.randomUUID()`) so the Storage object path
+   * (`strips/{session_id}/{strip_id}.png`) can be constructed and the image
+   * uploaded BEFORE the DB row is inserted, avoiding a "row exists but
+   * points at a not-yet-uploaded object" window. Falls back to the table's
+   * `default gen_random_uuid()` when omitted, so existing callers are
+   * unaffected.
+   */
+  id?: string;
   sessionId: string;
   stylePreset: string;
   storagePath: string;
@@ -12,6 +22,7 @@ export async function createStrip(input: {
   const { data, error } = await supabase
     .from("strips")
     .insert({
+      ...(input.id ? { id: input.id } : {}),
       session_id: input.sessionId,
       style_preset: input.stylePreset,
       storage_path: input.storagePath,
