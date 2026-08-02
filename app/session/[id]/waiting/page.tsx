@@ -1,13 +1,13 @@
+import WaitingClient from "./WaitingClient";
+
 interface WaitingPageProps {
   params: { id: string };
 }
 
-// Invite link + live presence list (Supabase Realtime) lands in Step 4 Item 4.
+// Server shell only — the waiting room needs client-side state (fetching
+// GET /api/sessions/:id, POST /join, Realtime presence), which lives in
+// WaitingClient. Mirrors the same split used by
+// app/session/new/page.tsx + ModeSelectClient.
 export default function WaitingPage({ params }: WaitingPageProps) {
-  return (
-    <main>
-      <h1>Waiting room — session {params.id}</h1>
-      <p>Invite link and live presence list placeholder.</p>
-    </main>
-  );
+  return <WaitingClient sessionId={params.id} />;
 }
