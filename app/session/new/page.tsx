@@ -1,9 +1,8 @@
-// Mode selection (solo vs. invite) + POST /api/sessions call lands in Step 4 Item 3.
+import ModeSelectClient from "./ModeSelectClient";
+
+// Server shell only — the mode-select buttons need client-side state (POST
+// /api/sessions, router navigation), which lives in ModeSelectClient. Mirrors
+// the same split used by app/session/[id]/capture/page.tsx + CaptureClient.
 export default function NewSessionPage() {
-  return (
-    <main>
-      <h1>Start a session</h1>
-      <p>Mode selection placeholder.</p>
-    </main>
-  );
+  return <ModeSelectClient />;
 }
