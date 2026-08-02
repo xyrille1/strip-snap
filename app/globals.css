@@ -2,22 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens per docs/online-photobooth-uiux-design-brief.md §2.
+ * Cream page background, ink body text — no dark-mode override, since the
+ * brief defines a single warm-editorial palette, not a dark theme.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #e6e8f7;
+  --foreground: #2b2620;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Helvetica, Arial, sans-serif;
+}
+
+/*
+ * Design brief §2: "no drop shadows ... depth comes from contrast, not
+ * shadow." Strip the default browser/box-shadow affordance from generic
+ * surfaces so component-level styling is the only source of shadow.
+ */
+* {
+  box-shadow: none;
 }
 
 @layer utilities {
