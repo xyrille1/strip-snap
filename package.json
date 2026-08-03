@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "type-check": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.39.6",
+    "@sentry/nextjs": "^10.69.0",
     "@supabase/supabase-js": "^2.111.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",

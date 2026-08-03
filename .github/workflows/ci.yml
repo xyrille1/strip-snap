@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same branch/PR so the queue doesn't back up.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    env:
+      # Test suite needs live Supabase (Postgres + Storage + Realtime) —
+      # provisioned by the `supabase start` step below and exported into
+      # $GITHUB_ENV. Clerk is mocked (`vi.mock`) in every test that touches
+      # an authenticated route, so real Clerk credentials are never needed
+      # for `npm test`. `next build` does load middleware.ts, which calls
+      # `clerkMiddleware()` at module scope — Clerk validates the
+      # *publishable* key's format (not liveness) at that point, so a
+      # correctly-shaped placeholder is enough; nothing here is a real
+      # secret.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2ktZHVtbXkuY2xlcmsuYWNjb3VudHMuZGV2JA=="
+      CLERK_SECRET_KEY: "sk_test_ci-placeholder-not-a-real-secret"
+      CLERK_WEBHOOK_SECRET: "whsec_ci-placeholder-not-a-real-secret"
+      # Any fixed value works: this only needs to match what the cron route
+      # tests send themselves (app/api/cron/*/route.test.ts), it is never
+      # used to authorize a real request against a deployed environment.
+      CRON_SECRET: "ci-placeholder-cron-secret"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run type-check
+
+      # The suite mixes pure-unit tests with integration tests that hit a
+      # live local Supabase instance (Postgres + Storage + Realtime) —
+      # every `lib/db/*.test.ts`, most `app/api/**/*.test.ts`,
+      # `lib/storage.test.ts`, `lib/analytics.test.ts`, and the RLS test
+      # under `supabase/migrations/` say so explicitly in their own
+      # `describe(...)` text ("integration, live local Supabase"). Rather
+      # than skip roughly half the suite in CI, boot the same local stack
+      # `npm test` already requires locally (per every prior phase's
+      # evidence) using Supabase's official Docker-based CLI action.
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Start local Supabase (Postgres + Storage + Realtime)
+        run: supabase start
+
+      - name: Export local Supabase connection details
+        run: |
+          supabase status -o env > /tmp/supabase-status.env
+          get() { grep "^$1=" /tmp/supabase-status.env | cut -d= -f2- | tr -d '"'; }
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(get API_URL)"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(get ANON_KEY)"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(get SERVICE_ROLE_KEY)"
+            echo "SUPABASE_DB_URL=$(get DB_URL)"
+            echo "SUPABASE_JWT_SECRET=$(get JWT_SECRET)"
+          } >> "$GITHUB_ENV"
+          rm /tmp/supabase-status.env
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop
