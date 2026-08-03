@@ -19,6 +19,21 @@ body {
 }
 
 /*
+ * Defensive guard against accidental horizontal overflow on narrow mobile
+ * viewports (design brief §5 / test-plan R-01/R-02) — e.g. the marketing
+ * page's slightly-overlapping, rotated filmstrip collage, or a Canvas-based
+ * strip preview rendering at its natural (wider-than-viewport) pixel size
+ * before CSS `max-w-full` scales it down on the next paint. Doesn't hide any
+ * content — everything on every screen already fits within the viewport
+ * width by design; this only prevents a stray horizontal scrollbar from a
+ * sub-pixel/transform edge case.
+ */
+html,
+body {
+  overflow-x: hidden;
+}
+
+/*
  * Design brief §2: "no drop shadows ... depth comes from contrast, not
  * shadow." Strip the default browser/box-shadow affordance from generic
  * surfaces so component-level styling is the only source of shadow.
