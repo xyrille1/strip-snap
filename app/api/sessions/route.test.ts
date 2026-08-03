@@ -51,6 +51,8 @@ describe("POST /api/sessions (integration, live local Supabase, Clerk auth() + r
     mockedCheckRateLimit.mockReset();
 
     if (sessionId) {
+      const supabase = createServiceRoleClient();
+      await supabase.from("analytics_events").delete().eq("session_id", sessionId);
       await deleteSession(sessionId);
       sessionId = null;
     }
@@ -107,6 +109,18 @@ describe("POST /api/sessions (integration, live local Supabase, Clerk auth() + r
     expect(participants[0].display_name).toBe("Host");
     expect(participants[0].user_id).toBeNull();
     expect(participants[0].session_id).toBe(body.id);
+
+    // Phase 11: session creation records a `session_started` analytics event
+    // with a null user_id for an anonymous creator.
+    const supabase = createServiceRoleClient();
+    const { data: events, error } = await supabase
+      .from("analytics_events")
+      .select()
+      .eq("session_id", body.id)
+      .eq("event", "session_started");
+    if (error) throw new Error(error.message);
+    expect(events).toHaveLength(1);
+    expect(events![0].user_id).toBeNull();
   });
 
   it("creates an invite session with a host participant row", async () => {
@@ -146,5 +160,17 @@ describe("POST /api/sessions (integration, live local Supabase, Clerk auth() + r
     const participants = await getParticipantsForSession(body.id);
     expect(participants).toHaveLength(1);
     expect(participants[0].user_id).toBe(session?.host_user_id);
+
+    // Phase 11: for a logged-in creator, the `session_started` event's
+    // user_id is the same resolved app_users.id as the participant row's
+    // (and the session's host_user_id) -- not re-derived separately.
+    const { data: events, error: eventsError } = await supabase
+      .from("analytics_events")
+      .select()
+      .eq("session_id", body.id)
+      .eq("event", "session_started");
+    if (eventsError) throw new Error(eventsError.message);
+    expect(events).toHaveLength(1);
+    expect(events![0].user_id).toBe(session?.host_user_id);
   });
 });
