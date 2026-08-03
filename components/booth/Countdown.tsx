@@ -42,7 +42,12 @@ export default function Countdown({ targetTimestamp }: CountdownProps) {
   const secondsRemaining = Math.ceil(remainingMs / 1000);
 
   return (
-    <div className="flex flex-col items-center gap-2" role="status" aria-live="polite">
+    <div
+      className="flex flex-col items-center gap-2"
+      role="status"
+      aria-live="polite"
+      aria-label="Countdown to capture"
+    >
       <span className="font-display text-7xl italic text-ink tabular-nums">
         {secondsRemaining > 0 ? secondsRemaining : "•"}
       </span>

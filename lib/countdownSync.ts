@@ -80,8 +80,18 @@ export interface CountdownSyncCallbacks {
    * Fires exactly once, from the `setTimeout` armed at the computed local
    * target. This is the ONLY place capture should ever be triggered from —
    * never from a broadcast/receive handler (TRD §3).
+   *
+   * `driftMs` is `now() - localTargetEpoch` measured at the instant this
+   * setTimeout actually fired — i.e. how much later than its scheduled
+   * target the real local capture trigger landed (never negative in
+   * practice, since a JS timer can fire late but not early). This module is
+   * the only place with visibility into both the scheduled target and the
+   * actual fire time, so it computes the measurement; the caller (which
+   * knows the session id) decides whether/how to report it — see
+   * CaptureClient.tsx's `onCaptureTime` handler for the Sentry capture on
+   * outlier drift (ops-runbook.md §7).
    */
-  onCaptureTime: () => void;
+  onCaptureTime: (driftMs: number) => void;
 }
 
 export interface CountdownSyncOptions {
@@ -140,7 +150,8 @@ export function startCountdownSync(
     // network-jitter-sensitive receipt-triggering TRD §3 forbids.
     captureTimer = setTimeout(() => {
       captureTimer = null;
-      callbacks.onCaptureTime();
+      const driftMs = now() - localTargetEpoch;
+      callbacks.onCaptureTime(driftMs);
     }, delayMs);
   }
 

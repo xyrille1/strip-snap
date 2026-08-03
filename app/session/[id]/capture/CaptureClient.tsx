@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import * as Sentry from "@sentry/nextjs";
 import Button from "@/components/ui/Button";
-import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import Card from "@/components/ui/Card";
+import NumberedList from "@/components/ui/NumberedList";
 import CameraView, { type CameraPermissionState } from "@/components/booth/CameraView";
 import Countdown from "@/components/booth/Countdown";
+import SessionExpired from "@/components/booth/SessionExpired";
 import {
   broadcastCaptureAck,
   broadcastCountdownStart,
@@ -81,6 +84,52 @@ const DEFAULT_DISPLAY_NAME = "Guest";
  */
 const SETTLE_TIMEOUT_MS = 4000;
 
+/**
+ * Countdown-drift outlier threshold (ms), per ops-runbook.md §7's
+ * "countdown drift outliers" instrumentation requirement.
+ *
+ * `lib/countdownSync.ts` measures `driftMs` as how much later than its
+ * scheduled local target the `setTimeout` powering capture actually fired.
+ * 200ms is chosen because: it comfortably exceeds ordinary JS event-loop
+ * timer imprecision (modern browsers routinely fire `setTimeout` within a
+ * few ms to a few tens of ms of their target under normal load), so it
+ * won't page on harmless jitter — while still being a small fraction of the
+ * test-plan's sub-second (<1000ms) drift tolerance across participants, so
+ * a 200ms+ outlier on any single client is a real early-warning signal
+ * (backgrounded/throttled tab, a stalled main thread, or genuine clock
+ * skew) worth surfacing well before it could push the whole group over the
+ * sub-second budget.
+ */
+const COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS = 200;
+
+/**
+ * Instruction strip for this screen (design brief §5 / R-01): rendered via
+ * `NumberedList`'s new `layout="columns"` variant — 3 columns at `sm:` and
+ * up, collapsing to a horizontal-scroll row below it. Copy describes this
+ * screen's actual, currently-implemented flow (no invented steps): camera
+ * permission -> presence-driven synced countdown (see the "3./4. Countdown
+ * election" effect below) -> the fixed `MAX_PHOTOS`-shot local burst that
+ * fires automatically once the countdown reaches zero (see
+ * `performCaptureBurst` below) — there is no per-shot button to press.
+ */
+const CAPTURE_INSTRUCTIONS = [
+  {
+    title: "Get ready",
+    description:
+      "Allow camera access and frame yourself in the shot — everyone in the group needs to be ready before capture can begin.",
+  },
+  {
+    title: "Countdown starts together",
+    description:
+      "The moment the whole group is ready, one synced countdown begins for everyone at the same instant.",
+  },
+  {
+    title: "Smile — 4 automatic shots",
+    description:
+      `Hold still through the burst: ${MAX_PHOTOS} shots fire back-to-back on their own, no need to trigger each one.`,
+  },
+];
+
 /** Composite key so shotsRef can hold all `MAX_PHOTOS` shots per participant, not just one. */
 function shotKey(participantId: string, shotIndex: number): string {
   return `${participantId}:${shotIndex}`;
@@ -93,6 +142,7 @@ function allShotIndices(): number[] {
 type Step =
   | { step: "resolving-identity" }
   | { step: "identity-error"; message: string }
+  | { step: "session-expired" }
   | { step: "active"; participant: StoredParticipant };
 
 export default function CaptureClient({ sessionId }: CaptureClientProps) {
@@ -217,6 +267,15 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ displayName: DEFAULT_DISPLAY_NAME }),
         });
+
+        if (response.status === 404) {
+          // Expire-sessions cron already hard-deleted this session
+          // (backend-schema §7) — matches the "session 404s" case
+          // SessionExpired covers on every other screen that fetches
+          // session state.
+          if (!cancelled) setState({ step: "session-expired" });
+          return;
+        }
 
         if (!response.ok) {
           const body = (await response.json().catch(() => null)) as
@@ -453,7 +512,21 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
         },
         {
           onScheduled: (localTargetEpoch) => setCountdownTarget(localTargetEpoch),
-          onCaptureTime: () => {
+          onCaptureTime: (driftMs) => {
+            // ops-runbook.md §7: report countdown drift outliers with a
+            // real measurement (actual local fire time vs. scheduled
+            // target — computed in lib/countdownSync.ts, which is the only
+            // module with visibility into both), not a guess. See
+            // COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS's doc comment for why
+            // 200ms.
+            if (driftMs > COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS) {
+              Sentry.captureException(
+                new Error(
+                  `Countdown drift ${driftMs}ms exceeded the ${COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS}ms alert threshold`
+                ),
+                { tags: { area: "countdown_drift", session_id: sessionId } }
+              );
+            }
             void performCaptureRef.current();
           },
         }
@@ -502,31 +575,57 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
     );
   }
 
+  if (state.step === "session-expired") {
+    return <SessionExpired sessionId={sessionId} />;
+  }
+
   const blocked = cameraState === "denied" || cameraState === "unsupported";
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center justify-center gap-8 px-4 py-16">
-      <div className="text-center">
+    // Console screen: full-bleed on mobile (design brief §5) — no horizontal
+    // padding around the camera card below sm:, so the live preview runs
+    // edge-to-edge instead of sitting in a small centered card. Header text
+    // and the countdown/status row keep their own inset padding so only the
+    // camera view itself goes edge-to-edge.
+    <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center justify-center gap-6 py-8 sm:gap-8 sm:px-4 sm:py-16">
+      <div className="px-4 text-center sm:px-0">
         <p className="font-display text-sm italic text-rust-body">Capture</p>
         <h1 className="mt-2 font-display text-4xl italic text-ink">
           {blocked ? "Camera needed to continue" : "Hold still — the strip is coming"}
         </h1>
       </div>
 
-      <Card className="w-full overflow-hidden p-0">
+      {/* Instruction strip (design brief §5 / R-01): 3 columns at sm: and up,
+          a horizontal-scroll row below it. Same mobile-inset pattern as the
+          header/countdown above (px-4 sm:px-0) — `<main>` only supplies its
+          own sm:px-4, so mobile padding has to come from the child itself;
+          only the camera view below goes truly edge-to-edge on mobile. */}
+      <div className="w-full px-4 sm:px-0">
+        <Card className="p-6 sm:p-8">
+          <NumberedList items={CAPTURE_INSTRUCTIONS} layout="columns" />
+        </Card>
+      </div>
+
+      {/* Plain div, not <Card>, so the mobile-vs-desktop border/radius can be
+          composed with additive breakpoint classes (border-y always,
+          border-x/rounded only added at sm:) instead of fighting Card's
+          fixed border-all + rounded-lg classes for specificity. */}
+      <div className="w-full overflow-hidden border-y border-hairline border-structural-gray bg-cream sm:rounded-card-lg sm:border-x">
         <CameraView ref={videoRef} active onPermissionChange={setCameraState} />
-      </Card>
+      </div>
 
       {!blocked ? (
-        <>
+        <div className="flex flex-col items-center gap-4 px-4 sm:px-0">
           <Countdown targetTimestamp={countdownTarget} />
           {captured ? (
-            <Badge variant="success">
-              Captured — waiting on the rest of the group ({capturedCount}/
-              {Math.max(expectedCount, 1)})
-            </Badge>
+            <div role="status" aria-live="polite">
+              <Badge variant="success">
+                Captured — waiting on the rest of the group ({capturedCount}/
+                {Math.max(expectedCount, 1)})
+              </Badge>
+            </div>
           ) : null}
-        </>
+        </div>
       ) : null}
     </main>
   );
