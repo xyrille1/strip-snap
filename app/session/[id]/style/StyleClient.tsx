@@ -7,36 +7,18 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import StylePicker from "@/components/booth/StylePicker";
 import StripPreview from "@/components/booth/StripPreview";
+import SessionExpired from "@/components/booth/SessionExpired";
 import { STYLE_PRESETS } from "@/lib/validation/strip";
 import type { StripFormat, StylePreset } from "@/lib/compositor";
 import { loadSessionShots, type SessionShotsMap } from "@/lib/sessionShotsStorage";
 import { loadSelectedStyle, saveSelectedStyle } from "@/lib/styleStorage";
+import { fetchSessionSummary } from "@/lib/booth/sessionSummary";
 
 export interface StyleClientProps {
   sessionId: string;
 }
 
 const DEFAULT_FORMAT: StripFormat = "3";
-
-/**
- * Session/participants shape this screen actually reads — a small local
- * subset of GET /api/sessions/:id's response (app/api/sessions/[id]/route.ts,
- * Phase 5), not the full row shapes.
- */
-interface SessionSummary {
-  format: StripFormat;
-  participantCount: number;
-}
-
-async function fetchSessionSummary(sessionId: string): Promise<SessionSummary | null> {
-  const response = await fetch(`/api/sessions/${sessionId}`);
-  if (!response.ok) return null;
-  const body = (await response.json()) as {
-    session: { format: StripFormat };
-    participants: unknown[];
-  };
-  return { format: body.session.format, participantCount: body.participants.length };
-}
 
 export default function StyleClient({ sessionId }: StyleClientProps) {
   const router = useRouter();
@@ -45,6 +27,7 @@ export default function StyleClient({ sessionId }: StyleClientProps) {
   const [participantCount, setParticipantCount] = useState<number | undefined>(undefined);
   const [selectedPreset, setSelectedPreset] = useState<StylePreset>(STYLE_PRESETS[0]);
   const [hydrated, setHydrated] = useState(false);
+  const [expired, setExpired] = useState(false);
 
   // 1. Hydrate the session-wide shot map (lib/sessionShotsStorage.ts) — the
   // hand-off CaptureClient/PreviewClient wrote — plus any previously chosen
@@ -67,10 +50,18 @@ export default function StyleClient({ sessionId }: StyleClientProps) {
   // shot map's own key count as a fallback.
   useEffect(() => {
     let cancelled = false;
-    void fetchSessionSummary(sessionId).then((summary) => {
-      if (cancelled || !summary) return;
-      setFormat(summary.format);
-      setParticipantCount(summary.participantCount);
+    void fetchSessionSummary(sessionId).then((outcome) => {
+      if (cancelled) return;
+      if (outcome.kind === "expired" || outcome.kind === "not-found") {
+        setExpired(true);
+        return;
+      }
+      // "error" (network/unexpected failure) stays non-fatal here, same as
+      // before this helper existed — the preview still renders using the
+      // shot map's own key count as a fallback.
+      if (outcome.kind !== "ok") return;
+      setFormat(outcome.summary.format);
+      setParticipantCount(outcome.summary.participantCount);
     });
     return () => {
       cancelled = true;
@@ -97,6 +88,10 @@ export default function StyleClient({ sessionId }: StyleClientProps) {
   const hasAnyShot = Object.values(shotsByParticipant).some((shots) =>
     shots.some((shot) => shot !== null)
   );
+
+  if (expired) {
+    return <SessionExpired sessionId={sessionId} />;
+  }
 
   if (hydrated && !hasAnyShot) {
     return (
