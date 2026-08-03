@@ -45,3 +45,23 @@ export async function getStripById(id: string): Promise<StripRow | null> {
   if (error) throw new Error(error.message);
   return data;
 }
+
+/**
+ * All strips belonging to a session -- used by the expire-sessions cron
+ * (app/api/cron/expire-sessions/route.ts) to enumerate each strip's
+ * `storage_path` and delete the Storage object BEFORE the session row (and
+ * its cascaded strips rows) is deleted, since Postgres's `on delete cascade`
+ * never touches Storage objects (backend-schema §7).
+ */
+export async function getStripsBySessionId(
+  sessionId: string
+): Promise<StripRow[]> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("strips")
+    .select()
+    .eq("session_id", sessionId);
+
+  if (error) throw new Error(error.message);
+  return data;
+}
