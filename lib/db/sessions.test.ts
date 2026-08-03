@@ -6,8 +6,21 @@ import {
   updateSessionFormat,
   markSessionCompleted,
   deleteSession,
+  getExpiredSessions,
+  expireSession,
+  getSessionsPendingDeletion,
 } from "@/lib/db/sessions";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+
+/** Directly sets a session's `expires_at` — used to simulate TTL expiry without waiting real time. */
+async function setExpiresAt(id: string, date: Date): Promise<void> {
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase
+    .from("sessions")
+    .update({ expires_at: date.toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
 
 describe("lib/db/sessions (integration, live local Supabase)", () => {
   let createdId: string | null = null;
@@ -87,6 +100,89 @@ describe("lib/db/sessions (integration, live local Supabase)", () => {
       expect(persisted?.host_user_id).toBe(appUser.id);
     } finally {
       await supabase.from("app_users").delete().eq("id", appUser.id);
+    }
+  });
+
+  it("getExpiredSessions returns sessions past expires_at that aren't yet 'expired', and excludes ones that are still in the future", async () => {
+    const past = await createSession({ mode: "solo", hostUserId: null });
+    const future = await createSession({ mode: "solo", hostUserId: null });
+    try {
+      await setExpiresAt(past.id, new Date(Date.now() - 60_000));
+
+      const expired = await getExpiredSessions();
+      const ids = expired.map((s) => s.id);
+      expect(ids).toContain(past.id);
+      expect(ids).not.toContain(future.id);
+    } finally {
+      await deleteSession(past.id);
+      await deleteSession(future.id);
+    }
+  });
+
+  it("getExpiredSessions excludes sessions already marked status = 'expired'", async () => {
+    const session = await createSession({ mode: "solo", hostUserId: null });
+    try {
+      await setExpiresAt(session.id, new Date(Date.now() - 60_000));
+      await expireSession(session.id);
+
+      const expired = await getExpiredSessions();
+      expect(expired.map((s) => s.id)).not.toContain(session.id);
+    } finally {
+      await deleteSession(session.id);
+    }
+  });
+
+  it("expireSession sets status to 'expired' and persists it", async () => {
+    const session = await createSession({ mode: "invite", hostUserId: null });
+    try {
+      const updated = await expireSession(session.id);
+      expect(updated.status).toBe("expired");
+
+      const persisted = await getSessionById(session.id);
+      expect(persisted?.status).toBe("expired");
+    } finally {
+      await deleteSession(session.id);
+    }
+  });
+
+  it("getSessionsPendingDeletion returns 'expired' sessions whose expires_at is older than the buffer, excluding ones expired more recently than the buffer", async () => {
+    const oldExpired = await createSession({ mode: "solo", hostUserId: null });
+    const recentlyExpired = await createSession({
+      mode: "solo",
+      hostUserId: null,
+    });
+    try {
+      await setExpiresAt(
+        oldExpired.id,
+        new Date(Date.now() - 2 * 60 * 60 * 1000) // 2h ago
+      );
+      await setExpiresAt(
+        recentlyExpired.id,
+        new Date(Date.now() - 5 * 60 * 1000) // 5min ago
+      );
+      await expireSession(oldExpired.id);
+      await expireSession(recentlyExpired.id);
+
+      const pending = await getSessionsPendingDeletion(60 * 60 * 1000); // 1h buffer
+      const ids = pending.map((s) => s.id);
+      expect(ids).toContain(oldExpired.id);
+      expect(ids).not.toContain(recentlyExpired.id);
+    } finally {
+      await deleteSession(oldExpired.id);
+      await deleteSession(recentlyExpired.id);
+    }
+  });
+
+  it("getSessionsPendingDeletion excludes sessions that are not status = 'expired', even if expires_at is far in the past", async () => {
+    const session = await createSession({ mode: "solo", hostUserId: null });
+    try {
+      await setExpiresAt(session.id, new Date(Date.now() - 2 * 60 * 60 * 1000));
+      // status is left at its default 'waiting' -- never marked expired.
+
+      const pending = await getSessionsPendingDeletion(60 * 60 * 1000);
+      expect(pending.map((s) => s.id)).not.toContain(session.id);
+    } finally {
+      await deleteSession(session.id);
     }
   });
 });

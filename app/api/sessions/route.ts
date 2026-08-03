@@ -6,6 +6,7 @@ import { createSession } from "@/lib/db/sessions";
 import { addParticipant } from "@/lib/db/participants";
 import { getOrCreateByClerkId } from "@/lib/db/appUsers";
 import { resolveClientIp } from "@/lib/http/clientIp";
+import { trackEvent } from "@/lib/analytics";
 
 // backend-schema.md §5: "e.g., 10 session creations/hour/IP" — cheap anti-abuse
 // threshold for a free-tier deploy, not a hard product requirement.
@@ -63,6 +64,18 @@ export async function POST(request: NextRequest) {
     sessionId: session.id,
     userId: hostUserId,
     displayName: DEFAULT_HOST_DISPLAY_NAME,
+  });
+
+  // TRD item 9a / implementation-plan Phase 11: fire-and-record only after
+  // the session (and its host participant row) actually exist. Reuses the
+  // same `hostUserId` resolution above -- null for an anonymous creator, the
+  // resolved app_users.id for a logged-in one -- rather than re-deriving it.
+  // trackEvent never rejects (see lib/analytics.ts), so this can't turn a
+  // successful session creation into a 500.
+  await trackEvent({
+    sessionId: session.id,
+    event: "session_started",
+    userId: hostUserId,
   });
 
   return NextResponse.json(

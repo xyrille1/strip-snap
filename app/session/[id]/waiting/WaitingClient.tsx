@@ -8,6 +8,7 @@ import Badge from "@/components/ui/Badge";
 import NumberedList from "@/components/ui/NumberedList";
 import PresenceList from "@/components/booth/PresenceList";
 import ReadyToggle from "@/components/booth/ReadyToggle";
+import SessionExpired from "@/components/booth/SessionExpired";
 import {
   leaveSessionChannel,
   setRealtimeAuth,
@@ -43,6 +44,7 @@ interface JoinedParticipant {
 type PageState =
   | { step: "loading" }
   | { step: "error"; message: string }
+  | { step: "expired" }
   | {
       step: "name-entry";
       session: SessionSummary;
@@ -107,13 +109,18 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
         const response = await fetch(`/api/sessions/${sessionId}`);
         if (cancelled) return;
 
+        if (response.status === 404) {
+          // Expire-sessions cron already hard-deleted this session
+          // (backend-schema §7) — same end state as status === "expired"
+          // below, just discovered via a 404 instead of the row itself.
+          setState({ step: "expired" });
+          return;
+        }
+
         if (!response.ok) {
           setState({
             step: "error",
-            message:
-              response.status === 404
-                ? "This session doesn't exist or has expired."
-                : "Couldn't load this session. Please try again.",
+            message: "Couldn't load this session. Please try again.",
           });
           return;
         }
@@ -122,6 +129,12 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
           session: SessionSummary;
           participants: ParticipantSummary[];
         };
+
+        if (body.session.status === "expired") {
+          setState({ step: "expired" });
+          return;
+        }
+
         setState({
           step: "name-entry",
           session: body.session,
@@ -290,6 +303,10 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
     );
   }
 
+  if (state.step === "expired") {
+    return <SessionExpired sessionId={sessionId} />;
+  }
+
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col justify-center gap-8 px-4 py-16">
       <div>
@@ -363,7 +380,9 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
               onToggle={setSelfReady}
             />
             {allReady ? (
-              <Badge variant="success">Everyone&apos;s ready — starting soon</Badge>
+              <div role="status" aria-live="polite">
+                <Badge variant="success">Everyone&apos;s ready — starting soon</Badge>
+              </div>
             ) : null}
           </div>
         </>

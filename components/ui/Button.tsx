@@ -30,9 +30,12 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const BASE_CLASSES =
   "inline-flex items-center justify-center gap-2 font-sans transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-cream focus-visible:ring-ink disabled:opacity-50 disabled:cursor-not-allowed";
 
-// Outlined pill — never a filled block (design brief §2).
+// Outlined pill — never a filled block (design brief §2). py-3 (not the
+// visually-tighter py-2.5) so the rendered height clears the ~44px touch
+// target guideline on mobile (test-plan R-01/R-03's "tap targets large
+// enough") without needing every call site to opt in individually.
 const DEFAULT_CLASSES =
-  "rounded-full border border-hairline border-ink bg-transparent px-6 py-2.5 text-sm font-medium text-ink hover:bg-ink hover:text-cream";
+  "rounded-full border border-hairline border-ink bg-transparent px-6 py-3 text-sm font-medium text-ink hover:bg-ink hover:text-cream";
 
 // Illuminated fills use the AA-safe body-size rust (#8C3A1D), not the
 // display-only #B14A26, since this fill sits under component-size

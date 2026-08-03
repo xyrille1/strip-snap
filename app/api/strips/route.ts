@@ -1,11 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStripSchema } from "@/lib/validation/strip";
+import { checkRateLimit } from "@/lib/rateLimit";
+import { resolveClientIp } from "@/lib/http/clientIp";
 import { getSessionById } from "@/lib/db/sessions";
 import { createStrip } from "@/lib/db/strips";
 import { uploadStripImage, mintSignedStripUrl } from "@/lib/storage";
+import { trackEvent } from "@/lib/analytics";
 
 /** backend-schema §5: signed URLs are 5-15 min (300-900s) expiry. Picked 10 min as the response's immediate URL. */
 const SIGNED_URL_EXPIRY_SECONDS = 600;
+
+// Security audit finding: this route is unauthenticated by design (see the
+// route-level comment below), so IP-keyed rate limiting is the only
+// app-level anti-abuse guard against unbounded/repeated strip uploads.
+// Mirrors the pattern + backend-schema §5 "e.g., 10 session creations/hour/IP"
+// anti-abuse intent used by app/api/sessions/route.ts (10/hour) and
+// app/api/sessions/[id]/join/route.ts (30/hour, generous for multiple
+// participants on one NAT'd IP). A real user produces at most one strip per
+// completed session, but EACH participant in a session uploads their OWN
+// strip (this file's own route-level comment), so several strips can
+// legitimately land from one shared/NAT'd IP in quick succession across
+// several sessions in an hour -- plus the occasional failed-upload retry.
+// 20/hour/IP is generous enough for that (a busy shared IP running several
+// 4-participant sessions) while still bounding well below the unbounded
+// abuse case the audit flagged.
+const CREATE_STRIP_RATE_LIMIT = { limit: 20, windowSeconds: 60 * 60 };
 
 // No `s` (dotAll) flag needed: the payload arrives as a JSON string value,
 // which can't contain a literal unescaped newline, so `.` already matches
@@ -70,6 +89,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
+  const clientIp = resolveClientIp(request);
+  const { success } = await checkRateLimit(
+    `strips:create:${clientIp}`,
+    CREATE_STRIP_RATE_LIMIT
+  );
+  if (!success) {
+    return NextResponse.json(
+      { error: "Too many strips created recently. Please try again later." },
+      { status: 429 }
+    );
+  }
+
   const session = await getSessionById(parsed.data.sessionId);
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -107,6 +138,17 @@ export async function POST(request: NextRequest) {
     strip.storage_path,
     SIGNED_URL_EXPIRY_SECONDS
   );
+
+  // TRD item 9a / implementation-plan Phase 11: this route deliberately has
+  // no Clerk auth requirement (see the route-level comment above), so there
+  // is no authenticated identity to resolve here -- `userId` is always null.
+  // trackEvent never rejects (see lib/analytics.ts), so this can't turn a
+  // successful strip upload into a 500.
+  await trackEvent({
+    sessionId: strip.session_id,
+    event: "strip_completed",
+    userId: null,
+  });
 
   return NextResponse.json(
     {

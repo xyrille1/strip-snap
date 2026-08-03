@@ -41,6 +41,28 @@ describe("createStripSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts an imageDataUrl right at the 8 MiB max length", () => {
+    const maxLength = 8 * 1024 * 1024;
+    const prefix = "data:image/png;base64,";
+    const body = "A".repeat(maxLength - prefix.length);
+    const result = createStripSchema.safeParse({
+      ...validBody,
+      imageDataUrl: `${prefix}${body}`,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an imageDataUrl exceeding the 8 MiB max length", () => {
+    const maxLength = 8 * 1024 * 1024;
+    const prefix = "data:image/png;base64,";
+    const body = "A".repeat(maxLength - prefix.length + 1);
+    const result = createStripSchema.safeParse({
+      ...validBody,
+      imageDataUrl: `${prefix}${body}`,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects an unrecognized style_preset", () => {
     const result = createStripSchema.safeParse({
       ...validBody,
