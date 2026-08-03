@@ -21,7 +21,28 @@ const SIGNED_URL_EXPIRY_SECONDS = 600;
  * "no login needed to view a finished strip" requirement (F-28); the id
  * itself is the access-control mechanism (backend-schema §1.3, UUIDv4,
  * non-guessable).
+ *
+ * `dynamic = "force-dynamic"` (same reasoning as app/api/time/route.ts):
+ * without it, Next.js can statically optimize/cache this handler and would
+ * serve the SAME minted signed URL forever instead of calling
+ * `mintSignedStripUrl` fresh every request — exactly the S-03 regression
+ * this route exists to prevent (backend-schema §5, 5-15 min expiry means a
+ * cached response would eventually hand out an expired/dead link).
+ *
+ * `fetchCache = "force-no-store"` is ALSO required, not just defensive
+ * belt-and-suspenders: `getStripById`/`mintSignedStripUrl` go through
+ * `supabase-js`, which calls the platform `fetch()` under the hood to talk
+ * to PostgREST/Storage. Next.js's Data Cache intercepts that `fetch()` and,
+ * verified empirically in dev, kept serving a byte-identical stale signed
+ * URL on every subsequent request EVEN with `dynamic = "force-dynamic"`
+ * alone set — the route handler re-ran (confirmed via per-request log
+ * timing), but the inner `fetch()` result was still served from cache.
+ * `fetchCache = "force-no-store"` forces every fetch in this route to
+ * bypass the Data Cache regardless of the call site's own cache option.
  */
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
