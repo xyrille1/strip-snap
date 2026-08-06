@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { computeStripLayout, drawStrip, type StripFormat, type StripImages, type StylePreset } from "@/lib/compositor";
+import { computeStripLayout, drawStrip, type StripFormat, type StylePreset } from "@/lib/compositor";
+import { loadStripImages, resolveParticipants } from "@/lib/compositeStrip";
 
 export interface StripPreviewProps {
   format: StripFormat;
@@ -42,11 +43,9 @@ export default function StripPreview({
 }: StripPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const participantIds = Object.keys(shotsByParticipant).sort();
-  const participantCount = Math.max(
-    participantCountOverride ?? 0,
-    participantIds.length,
-    1
+  const { participantIds, participantCount } = resolveParticipants(
+    shotsByParticipant,
+    participantCountOverride
   );
 
   useEffect(() => {
@@ -65,31 +64,14 @@ export default function StripPreview({
 
     let cancelled = false;
 
-    async function loadImage(dataUrl: string): Promise<HTMLImageElement | null> {
-      return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
-        img.src = dataUrl;
-      });
-    }
-
     async function render() {
-      const slotCount = Number(format);
       // images[slotIndex][participantIndex] — matches drawStrip's expected
       // StripImages shape (lib/compositor.ts). Participant order is fixed
       // (sorted participantIds) so a re-render never shuffles which
-      // sub-region belongs to which participant.
-      const images: StripImages = [];
-      for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
-        const row = await Promise.all(
-          participantIds.map(async (participantId) => {
-            const dataUrl = shotsByParticipant[participantId]?.[slotIndex] ?? null;
-            return dataUrl ? loadImage(dataUrl) : null;
-          })
-        );
-        images.push(row);
-      }
+      // sub-region belongs to which participant. Shared with
+      // GenerateClient's final-composite path via lib/compositeStrip.ts
+      // rather than duplicating this image-loading loop.
+      const images = await loadStripImages(format, shotsByParticipant, participantIds);
 
       if (cancelled) return;
       drawStrip(ctx, layout, images, stylePreset);

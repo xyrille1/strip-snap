@@ -1,13 +1,13 @@
+import OutputClient from "./OutputClient";
+
 interface OutputPageProps {
   params: { id: string };
 }
 
-// In-session finished-strip hero + download/share/print lands in Step 4 Item 8.
+// Server shell only — the in-session hero moment needs client-side state
+// (sessionStorage hand-off from /generate, GET /api/strips/:id), which
+// lives in OutputClient. Mirrors the same split used by every other
+// app/session/[id]/*/page.tsx screen.
 export default function OutputPage({ params }: OutputPageProps) {
-  return (
-    <main>
-      <h1>Your strip — session {params.id}</h1>
-      <p>Finished strip hero and download/share/print actions placeholder.</p>
-    </main>
-  );
+  return <OutputClient sessionId={params.id} />;
 }

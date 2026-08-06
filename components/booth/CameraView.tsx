@@ -1,7 +1,24 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import * as Sentry from "@sentry/nextjs";
 import PermissionFallback from "./PermissionFallback";
+
+/**
+ * True only for the specific browser-level permission-denial case TRD §8
+ * calls out (the user explicitly blocked/dismissed the camera prompt) —
+ * distinct from other getUserMedia failures (no device, device busy, etc.)
+ * which the UI still treats as "denied" but which ops-runbook.md §7 doesn't
+ * ask to be individually instrumented.
+ */
+function isPermissionDeniedError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "name" in err &&
+    (err as { name?: unknown }).name === "NotAllowedError"
+  );
+}
 
 /** Mirrors PermissionFallback's `reason` union, plus "granted" for the live-preview state. */
 export type CameraPermissionState = "pending" | "granted" | "denied" | "unsupported";
@@ -39,6 +56,14 @@ const CameraView = forwardRef<HTMLVideoElement, CameraViewProps>(function Camera
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [state, setState] = useState<CameraPermissionState>("pending");
+  // Bumped by handleRetry to force the request effect below to re-run even
+  // though `active` hasn't changed — re-invoking getUserMedia() is exactly
+  // what "try again" means here (Phase 13 polish pass, PermissionFallback's
+  // retry affordance).
+  const [retryToken, setRetryToken] = useState(0);
+  // Whether the Permissions API reports a retry is actually likely to
+  // re-prompt (see PermissionFallback's doc comment on why this matters).
+  const [canRetry, setCanRetry] = useState(false);
 
   useImperativeHandle(forwardedRef, () => videoRef.current as HTMLVideoElement);
 
@@ -48,6 +73,12 @@ const CameraView = forwardRef<HTMLVideoElement, CameraViewProps>(function Camera
     if (!navigator.mediaDevices?.getUserMedia) {
       setState("unsupported");
       onPermissionChange?.("unsupported");
+      // ops-runbook.md §7: camera permission denials/unsupported-browser
+      // instrumentation.
+      Sentry.captureException(
+        new Error("getUserMedia is not supported in this browser"),
+        { tags: { area: "camera_permission", reason: "unsupported" } }
+      );
       return;
     }
 
@@ -76,6 +107,14 @@ const CameraView = forwardRef<HTMLVideoElement, CameraViewProps>(function Camera
         // device already in use, etc.) is treated the same way — an
         // explicit blocking fallback, not a silent failure or hung screen.
         console.error("[CameraView] getUserMedia failed", err);
+        if (isPermissionDeniedError(err)) {
+          // ops-runbook.md §7: camera permission denials instrumentation —
+          // only the explicit NotAllowedError case, not every getUserMedia
+          // failure (see isPermissionDeniedError's doc comment).
+          Sentry.captureException(err, {
+            tags: { area: "camera_permission", reason: "denied" },
+          });
+        }
         setState("denied");
         onPermissionChange?.("denied");
       });
@@ -86,7 +125,49 @@ const CameraView = forwardRef<HTMLVideoElement, CameraViewProps>(function Camera
       streamRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onPermissionChange is expected to be a stable callback from the parent; re-running this effect on every parent render would re-request the camera stream unnecessarily.
-  }, [active]);
+  }, [active, retryToken]);
+
+  // Once denied, ask the Permissions API (where available) whether camera
+  // access is merely at the "prompt" stage (a retry can re-open the native
+  // dialog) or genuinely "denied" at the browser level (a retry will just
+  // reject again with no dialog shown at all) — PermissionFallback only
+  // renders a "Try again" button when this resolves true, per its own doc
+  // comment on not offering a control that silently does nothing.
+  useEffect(() => {
+    if (state !== "denied") {
+      setCanRetry(false);
+      return;
+    }
+    if (!navigator.permissions?.query) {
+      // Can't verify (e.g. Safari's inconsistent Permissions API support)
+      // — stay conservative and don't offer a retry that might be a no-op.
+      setCanRetry(false);
+      return;
+    }
+
+    let cancelled = false;
+    navigator.permissions
+      .query({ name: "camera" })
+      .then((status) => {
+        if (cancelled) return;
+        setCanRetry(status.state === "prompt");
+        status.onchange = () => {
+          if (cancelled) return;
+          setCanRetry(status.state === "prompt");
+        };
+      })
+      .catch(() => {
+        if (!cancelled) setCanRetry(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state]);
+
+  function handleRetry() {
+    setRetryToken((token) => token + 1);
+  }
 
   return (
     <div className="relative">
@@ -101,7 +182,12 @@ const CameraView = forwardRef<HTMLVideoElement, CameraViewProps>(function Camera
             : "hidden"
         }
       />
-      {state !== "granted" ? <PermissionFallback reason={state} /> : null}
+      {state !== "granted" ? (
+        <PermissionFallback
+          reason={state}
+          onRetry={state === "denied" && canRetry ? handleRetry : undefined}
+        />
+      ) : null}
     </div>
   );
 });

@@ -73,13 +73,22 @@ export default function PresenceList({ sessionId, participants = [] }: PresenceL
 
   return (
     <Card>
-      <ul className="divide-y divide-structural-gray">
+      {/* aria-live announces joins/leaves and status changes (e.g. "ready")
+          as they happen (test-plan A-04) — additions/text changes only, not
+          full-list re-announcement on every render, since aria-relevant
+          defaults to "additions text". */}
+      <ul
+        aria-live="polite"
+        aria-atomic="false"
+        aria-label="Participants"
+        className="divide-y divide-structural-gray"
+      >
         {rows.map((participant) => (
           <li
             key={participant.id}
-            className="flex items-center justify-between gap-4 px-6 py-4"
+            className="flex items-center justify-between gap-3 px-4 py-4 sm:gap-4 sm:px-6"
           >
-            <span className="font-sans text-sm font-medium text-ink">
+            <span className="min-w-0 truncate font-sans text-sm font-medium text-ink">
               {participant.displayName}
             </span>
             <Badge variant={STATUS_BADGE_VARIANT[participant.status]}>

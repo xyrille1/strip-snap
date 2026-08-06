@@ -36,12 +36,19 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
+      # `npm run lint` runs plain `eslint .` (not `next lint`), which by
+      # default only scans app/, components/, lib/, pages/, src/ — that
+      # silently missed root-level files pushed across earlier phases
+      # (middleware.ts, instrumentation.ts, instrumentation-client.ts,
+      # sentry.*.config.ts, and supabase/migrations/*.test.ts). Plain eslint
+      # + .eslintignore (node_modules/.next/supabase/.temp/.branches/.clerk)
+      # covers every file actually pushed, not just Next.js's default subset.
       - name: Lint
         run: npm run lint
 
