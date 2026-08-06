@@ -14,7 +14,7 @@ See `docs/online-photobooth-prd.md`, `docs/online-photobooth-trd.md`, and `docs/
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+ (required by `@supabase/supabase-js`'s Realtime client, which needs native `WebSocket` support)
 - [Docker](https://www.docker.com/) (required by the Supabase CLI's local dev stack)
 - [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) (already a devDependency — invoke via `npx supabase`, or install globally)
 - A [Clerk](https://clerk.com/) account (free tier is fine)
