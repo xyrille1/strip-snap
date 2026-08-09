@@ -53,13 +53,16 @@ export interface StripLayout {
 
 // -- Geometry constants ------------------------------------------------
 // A vertical photobooth strip: N stacked slots, one per shot index, with a
-// consistent outer margin and inter-slot gutter. Slot aspect (4:3) matches
-// lib/captureResolution.ts's captured-frame aspect so images fill their
-// region without heavy letterboxing.
+// consistent outer margin and inter-slot gutter. Slot aspect (3:4, portrait)
+// matches lib/captureResolution.ts's captured-frame aspect (MAX_CAPTURE_WIDTH
+// 720 / MAX_CAPTURE_HEIGHT 960 = 3:4) and every camera/preview surface's own
+// `aspect-[3/4]` (CameraView.tsx, PreviewClient.tsx) — a slot is drawn via
+// `drawImageCover` below, but keeping the slot's own aspect close to the
+// source's still keeps crop loss minimal in the common case.
 const CANVAS_MARGIN = 24;
 const SLOT_GUTTER = 16;
-const SLOT_WIDTH = 480;
-const SLOT_HEIGHT = 360;
+const SLOT_WIDTH = 360;
+const SLOT_HEIGHT = 480;
 /** Gap between sub-regions within a single slot, when participantCount > 1. */
 const SUB_REGION_GUTTER = 6;
 
@@ -202,6 +205,71 @@ const STYLE_FILTERS: Record<StylePreset, string> = {
 export type StripImages = (CanvasImageSource | null)[][];
 
 /**
+ * Reads the intrinsic pixel size of a `CanvasImageSource`. Every image this
+ * app actually draws is an `HTMLImageElement` (loaded by
+ * lib/compositeStrip.ts's `loadImage`) — the other branches exist only so a
+ * future caller passing a video/canvas/bitmap frame degrades gracefully
+ * instead of silently reading `undefined` dimensions.
+ */
+function getIntrinsicSize(image: CanvasImageSource): { width: number; height: number } | null {
+  if (image instanceof HTMLImageElement) {
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  }
+  if (image instanceof HTMLVideoElement) {
+    return { width: image.videoWidth, height: image.videoHeight };
+  }
+  if (image instanceof HTMLCanvasElement) {
+    return { width: image.width, height: image.height };
+  }
+  if (typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap) {
+    return { width: image.width, height: image.height };
+  }
+  return null;
+}
+
+/**
+ * Draws `image` into `region` the way CSS `object-fit: cover` would — filling
+ * the region completely, preserving the source's own aspect ratio, and
+ * center-cropping whichever axis overflows — rather than a plain
+ * `ctx.drawImage(image, x, y, w, h)`, which STRETCHES the source to exactly
+ * `w`x`h` and visibly distorts it whenever the source aspect doesn't match
+ * the region's. Sources here are camera captures (lib/captureResolution.ts
+ * preserves the device's native aspect, which isn't guaranteed to be exactly
+ * 3:4 on every webcam), so this crop-to-fill step is what actually keeps
+ * every slot/sub-region distortion-free rather than relying on layout
+ * constants alone to happen to match.
+ */
+function drawImageCover(ctx: CanvasRenderingContext2D, image: CanvasImageSource, region: SubRegion): void {
+  const intrinsic = getIntrinsicSize(image);
+  if (!intrinsic || intrinsic.width <= 0 || intrinsic.height <= 0) {
+    // No usable intrinsic size to crop against — fall back to a plain
+    // stretch rather than skipping the draw entirely.
+    ctx.drawImage(image, region.x, region.y, region.width, region.height);
+    return;
+  }
+
+  const sourceAspect = intrinsic.width / intrinsic.height;
+  const destAspect = region.width / region.height;
+
+  let sx = 0;
+  let sy = 0;
+  let sWidth = intrinsic.width;
+  let sHeight = intrinsic.height;
+
+  if (sourceAspect > destAspect) {
+    // Source is relatively wider than the destination — crop its left/right edges.
+    sWidth = intrinsic.height * destAspect;
+    sx = (intrinsic.width - sWidth) / 2;
+  } else if (sourceAspect < destAspect) {
+    // Source is relatively taller than the destination — crop its top/bottom edges.
+    sHeight = intrinsic.width / destAspect;
+    sy = (intrinsic.height - sHeight) / 2;
+  }
+
+  ctx.drawImage(image, sx, sy, sWidth, sHeight, region.x, region.y, region.width, region.height);
+}
+
+/**
  * Draws `images` into `ctx` using the geometry from `computeStripLayout`.
  * DOM-dependent — exercised in-browser only.
  */
@@ -237,8 +305,46 @@ export function drawStrip(
       // always redraws every image fresh from `images` with the newly
       // selected filter (no stale bleed from a previous preset's draw).
       ctx.filter = filter;
-      ctx.drawImage(image, region.x, region.y, region.width, region.height);
+      drawImageCover(ctx, image, region);
       ctx.restore();
     });
   });
+
+  drawSprocketHoles(ctx, layout);
+}
+
+// -- Sprocket-hole perforation ------------------------------------------
+const SPROCKET_HOLE_RADIUS = 4;
+const SPROCKET_HOLE_SPACING = 40;
+
+/**
+ * Punches a column of small round holes down each of the strip's two long
+ * (margin) edges — the physical filmstrip detail that reads as "photobooth"
+ * at a glance, per this task's "polish the strip design" ask. Drawn LAST, as
+ * true transparency (`globalCompositeOperation: "destination-out"`) rather
+ * than a same-color fill, so the holes read correctly no matter what the
+ * strip is later composited over (the `bg-film-black` page wrapper today, but
+ * also a print page or a future dark/light surface) instead of only working
+ * by coincidence of matching background colors.
+ *
+ * Confined entirely to the `CANVAS_MARGIN` gutter on each side — never
+ * overlaps a slot's own image region, so this is purely a border decoration,
+ * not a crop into anyone's photo.
+ */
+function drawSprocketHoles(ctx: CanvasRenderingContext2D, layout: StripLayout): void {
+  const xLeft = CANVAS_MARGIN / 2;
+  const xRight = layout.canvasWidth - CANVAS_MARGIN / 2;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.fillStyle = "#000";
+  for (let y = CANVAS_MARGIN / 2; y < layout.canvasHeight; y += SPROCKET_HOLE_SPACING) {
+    ctx.beginPath();
+    ctx.arc(xLeft, y, SPROCKET_HOLE_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(xRight, y, SPROCKET_HOLE_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }

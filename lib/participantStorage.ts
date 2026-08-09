@@ -7,10 +7,12 @@
  * `realtimeToken`, `displayName`) previously lived only in React state,
  * which is lost the moment the browser navigates from `/waiting` to
  * `/capture`. This module persists it to `sessionStorage`, keyed by session
- * id, so both the invite-room path (WaitingClient saves after `/join`) and
- * the direct-solo path (CaptureClient saves after its own fallback `/join`
- * call, per flows.md §1a) converge on the same stored shape before capture
- * logic runs.
+ * id, so the invite-room path (WaitingClient saves after `/join`), the
+ * direct-solo path (ModeSelectClient saves the host identity
+ * `POST /api/sessions` already returned, before ever navigating to
+ * `/capture` — see that file's doc comment), and CaptureClient's own
+ * last-resort fallback `/join` call all converge on the same stored shape
+ * before capture logic runs.
  *
  * `sessionStorage` (not `localStorage`) is deliberate: this identity is
  * scoped to one browser tab's session-in-progress, not something that
