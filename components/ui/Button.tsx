@@ -33,17 +33,21 @@ const BASE_CLASSES =
 // Outlined pill — never a filled block (design brief §2). py-3 (not the
 // visually-tighter py-2.5) so the rendered height clears the ~44px touch
 // target guideline on mobile (test-plan R-01/R-03's "tap targets large
-// enough") without needing every call site to opt in individually.
+// enough") without needing every call site to opt in individually. Border
+// weight is the themed booth token (tailwind.config.ts) — 3px/2px/4px per
+// theme — the pill shape itself stays fixed across all three themes.
 const DEFAULT_CLASSES =
-  "rounded-full border border-hairline border-ink bg-transparent px-6 py-3 text-sm font-medium text-ink hover:bg-ink hover:text-cream";
+  "rounded-full border-booth border-ink bg-transparent px-6 py-3 text-sm font-medium text-ink hover:bg-ink hover:text-cream";
 
-// Illuminated fills use the AA-safe body-size rust (#8C3A1D), not the
-// display-only #B14A26, since this fill sits under component-size
-// icons/labels rather than large display type (design brief §2's own AA
-// warning; verified against test-plan A-01).
+// Illuminated fills use forest/rust-body — both themed CSS-var tokens
+// (tailwind.config.ts) that stay AA-safe against each theme's own panel
+// background (see app/globals.css's per-theme forest/rust overrides). The
+// glow itself is the shared themed shadow (hard offset / cyan-pink glow /
+// soft drop) rather than a per-color rgba, since the underlying colors are
+// no longer static hex values.
 const ILLUMINATED_COLOR_CLASSES: Record<"forest" | "rust", string> = {
-  forest: "bg-forest text-cream shadow-[0_0_20px_2px_rgba(51,66,46,0.35)]",
-  rust: "bg-rust-body text-cream shadow-[0_0_20px_2px_rgba(140,58,29,0.35)]",
+  forest: "bg-forest text-cream shadow-booth",
+  rust: "bg-rust-body text-cream shadow-booth",
 };
 
 const ILLUMINATED_ACTIVE_RING: Record<"forest" | "rust", string> = {
@@ -129,7 +133,7 @@ export default function Button({
 // motif is icon-sized and fixed-circle; a labeled CTA like "Enter the
 // booth →" needs to size to its text).
 const CTA_CLASSES =
-  "rounded-full bg-forest text-cream px-8 py-3.5 text-base font-semibold shadow-[0_0_24px_4px_rgba(51,66,46,0.3)] hover:bg-forest/90";
+  "rounded-full bg-forest text-cream px-8 py-3.5 text-base font-semibold shadow-booth hover:bg-forest/90";
 
 export interface CtaLinkProps {
   href: string;
