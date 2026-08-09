@@ -10,6 +10,8 @@ import NumberedList from "@/components/ui/NumberedList";
 import CameraView, { type CameraPermissionState } from "@/components/booth/CameraView";
 import Countdown from "@/components/booth/Countdown";
 import SessionExpired from "@/components/booth/SessionExpired";
+import BoothFrame from "@/components/booth3d/BoothFrame";
+import ScreenConsole, { type ScreenStatus } from "@/components/booth3d/ScreenConsole";
 import {
   broadcastCaptureAck,
   broadcastCountdownStart,
@@ -53,10 +55,14 @@ export interface CaptureClientProps {
 }
 
 /**
- * Default display name used only when this client reaches /capture with no
- * stored identity — i.e. solo mode (flows.md §1a skips the waiting room
- * entirely) or a direct navigation to /capture without ever joining. Well
- * within participants.display_name's 1-40 char constraint.
+ * Fallback display name for the rare case this client reaches /capture with
+ * no stored identity at all — a direct navigation to /capture, or
+ * sessionStorage having been cleared mid-flow. Solo mode's normal path no
+ * longer hits this: ModeSelectClient stores the host identity /api/sessions
+ * already created before ever navigating here (see that file's doc
+ * comment), so `loadStoredParticipant` below finds it and this fallback
+ * /join call is skipped entirely. Well within participants.display_name's
+ * 1-40 char constraint.
  */
 const DEFAULT_DISPLAY_NAME = "Guest";
 
@@ -173,6 +179,11 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
   const ackedRef = useRef<Set<string>>(new Set());
   const navigatedRef = useRef(false);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards the fallback POST /join below against firing twice for the same
+  // mount (e.g. a dev-mode double-invoked effect) before the first call's
+  // response has had a chance to write to sessionStorage — set synchronously,
+  // before the request goes out, not inside the async response handler.
+  const joinRequestedRef = useRef(false);
   // Holds the latest `performCapture` (declared further below, after the
   // callbacks it depends on) so the countdown-election effect — which sets
   // up `onCaptureTime` only once, guarded by `syncStartedRef` — always
@@ -248,9 +259,11 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
     if (allShotsIn) goToPreview();
   }, [goToPreview]);
 
-  // 1. Resolve identity: sessionStorage first (the invite-room path, saved
-  // by WaitingClient after /join), else call /join directly with a default
-  // name — this is what makes solo mode (which never visits /waiting) work.
+  // 1. Resolve identity: sessionStorage first — populated by WaitingClient
+  // after /join (invite path) or by ModeSelectClient from /api/sessions'
+  // response (solo path, which never visits /waiting). Only a direct
+  // navigation to /capture with no stored identity falls through to calling
+  // /join here directly, with a default name.
   useEffect(() => {
     let cancelled = false;
 
@@ -260,6 +273,9 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
         if (!cancelled) setState({ step: "active", participant: stored });
         return;
       }
+
+      if (joinRequestedRef.current) return;
+      joinRequestedRef.current = true;
 
       try {
         const response = await fetch(`/api/sessions/${sessionId}/join`, {
@@ -588,7 +604,7 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
     // and the countdown/status row keep their own inset padding so only the
     // camera view itself goes edge-to-edge.
     <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center justify-center gap-6 py-8 sm:gap-8 sm:px-4 sm:py-16">
-      <div className="px-4 text-center sm:px-0">
+      <div className="animate-fade-up px-4 text-center sm:px-0">
         <p className="font-display text-sm italic text-rust-body">Capture</p>
         <h1 className="mt-2 font-display text-4xl italic text-ink">
           {blocked ? "Camera needed to continue" : "Hold still — the strip is coming"}

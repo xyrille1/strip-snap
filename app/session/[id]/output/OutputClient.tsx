@@ -91,12 +91,12 @@ export default function OutputClient({ sessionId }: OutputClientProps) {
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-10 px-4 py-20">
-      <div className="text-center print:hidden">
+      <div className="animate-fade-up text-center print:hidden">
         <p className="font-display text-sm italic text-rust-body">Your strip</p>
         <h1 className="mt-2 font-display text-5xl italic text-ink">Ready</h1>
       </div>
 
-      <div className="relative w-full max-w-sm">
+      <div className="relative w-full max-w-sm animate-fade-up">
         {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL, not a static/optimizable asset. */}
         <img
           src={strip.signedUrl}

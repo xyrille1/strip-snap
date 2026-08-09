@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
-import NumberedList from "@/components/ui/NumberedList";
 import PresenceList from "@/components/booth/PresenceList";
 import ReadyToggle from "@/components/booth/ReadyToggle";
 import SessionExpired from "@/components/booth/SessionExpired";
+import BoothFrame from "@/components/booth3d/BoothFrame";
+import { UsersIcon } from "@/components/booth3d/icons";
 import {
   leaveSessionChannel,
   setRealtimeAuth,
@@ -16,7 +17,7 @@ import {
   trackPresence,
   type PresenceState,
 } from "@/lib/realtime";
-import { saveStoredParticipant } from "@/lib/participantStorage";
+import { loadStoredParticipant, saveStoredParticipant } from "@/lib/participantStorage";
 
 export interface WaitingClientProps {
   sessionId: string;
@@ -213,10 +214,21 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
       setJoinError(null);
 
       try {
+        // If this browser already has a stored identity for this session
+        // (the session creator's own `Host` row — see ModeSelectClient's
+        // doc comment), pass its id along so /join renames that existing
+        // row to the name just typed instead of inserting a second,
+        // disconnected row for the same physical person. A genuine
+        // first-time joiner (fresh browser/tab, no stored identity) omits
+        // this and gets the normal fresh-row behavior.
+        const existing = loadStoredParticipant(sessionId);
         const response = await fetch(`/api/sessions/${sessionId}/join`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName: trimmed }),
+          body: JSON.stringify({
+            displayName: trimmed,
+            ...(existing ? { participantId: existing.participantId } : {}),
+          }),
         });
 
         if (!response.ok) {
@@ -308,85 +320,102 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
   }
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col justify-center gap-8 px-4 py-16">
-      <div>
-        <p className="font-display text-sm italic text-rust-body">Waiting room</p>
-        <h1 className="mt-2 font-display text-4xl italic text-ink">
-          Gathering everyone in the booth
-        </h1>
-      </div>
-
-      <Card className="p-6 sm:p-8">
-        <NumberedList items={INSTRUCTIONS} />
-      </Card>
-
-      <Card className="flex flex-col gap-3 p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-secondary">
-            Invite link
-          </p>
-          <p className="mt-1 truncate font-sans text-sm text-ink">{inviteUrl(sessionId)}</p>
-        </div>
-        <Button variant="default" onClick={handleCopyLink} className="shrink-0">
-          {copied ? "Copied" : "Copy link"}
-        </Button>
-      </Card>
-
-      {state.step === "name-entry" ? (
-        <Card className="flex flex-col gap-4 p-6 sm:p-8">
-          <form onSubmit={handleJoin} className="flex flex-col gap-4">
-            <label className="flex flex-col gap-2">
-              <span className="font-sans text-sm font-medium text-ink">Your name</span>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                maxLength={40}
-                required
-                placeholder="e.g. Priya"
-                className="rounded-card border border-hairline border-structural-gray bg-cream px-4 py-2.5 font-sans text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink"
-              />
-            </label>
-            {joinError ? (
-              <div role="alert">
-                <Badge variant="warning">{joinError}</Badge>
-              </div>
-            ) : null}
-            <Button
-              type="submit"
-              variant="default"
-              className="w-full py-3.5 text-base"
-              disabled={joining}
-              aria-busy={joining}
-            >
-              {joining ? "Joining…" : "Join waiting room"}
-            </Button>
-          </form>
-        </Card>
-      ) : (
-        <>
-          <PresenceList sessionId={sessionId} participants={state.participants.map((p) => ({
-            id: p.id,
-            displayName: p.display_name,
-            status: p.status,
-          }))} />
-
-          <div className="flex flex-col items-center gap-4">
-            <ReadyToggle
-              sessionId={sessionId}
-              participantId={state.participant.id}
-              displayName={state.participant.displayName}
-              isReady={selfReady}
-              onToggle={setSelfReady}
-            />
-            {allReady ? (
-              <div role="status" aria-live="polite">
-                <Badge variant="success">Everyone&apos;s ready — starting soon</Badge>
-              </div>
-            ) : null}
+    <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-12">
+      <BoothFrame
+        pose="setup"
+        leftInstructions={INSTRUCTIONS.map((item) => item.title)}
+        rightLabel="WAITING"
+        rightSublabel="For your friends"
+      >
+        <div className="flex w-[min(92vw,420px)] flex-col gap-6">
+          <div className="text-center">
+            <p className="font-display text-sm italic text-rust-body">Waiting room</p>
+            <h1 className="mt-2 font-display text-3xl italic text-ink">
+              Gathering everyone in the booth
+            </h1>
           </div>
-        </>
-      )}
+
+          <Card className="flex flex-col gap-3 p-6">
+            <div className="min-w-0">
+              <p className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-secondary">
+                Invite link
+              </p>
+              <p className="mt-1 truncate font-sans text-sm text-ink">{inviteUrl(sessionId)}</p>
+            </div>
+            <Button variant="default" onClick={handleCopyLink} className="shrink-0">
+              {copied ? "Copied" : "Copy link"}
+            </Button>
+          </Card>
+
+          {state.step === "name-entry" ? (
+            <Card className="flex flex-col gap-4 p-6">
+              <form onSubmit={handleJoin} className="flex flex-col gap-4">
+                <label className="flex flex-col gap-2">
+                  <span className="font-sans text-sm font-medium text-ink">Your name</span>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    maxLength={40}
+                    required
+                    placeholder="e.g. Priya"
+                    className="rounded-booth border-booth-inner border-structural-gray bg-cream px-4 py-2.5 font-sans text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink"
+                  />
+                </label>
+                {joinError ? (
+                  <div role="alert">
+                    <Badge variant="warning">{joinError}</Badge>
+                  </div>
+                ) : null}
+                <Button
+                  type="submit"
+                  variant="default"
+                  className="w-full py-3.5 text-base"
+                  disabled={joining}
+                  aria-busy={joining}
+                >
+                  {joining ? "Joining…" : "Join waiting room"}
+                </Button>
+              </form>
+            </Card>
+          ) : (
+            <>
+              <Card className="flex flex-col items-center gap-3 p-6 text-center">
+                <span className="text-rust-body animate-spin">
+                  <UsersIcon size={28} />
+                </span>
+                <p className="font-sans text-sm text-ink-secondary">
+                  Watching for everyone to join and get ready…
+                </p>
+              </Card>
+
+              <PresenceList
+                sessionId={sessionId}
+                participants={state.participants.map((p) => ({
+                  id: p.id,
+                  displayName: p.display_name,
+                  status: p.status,
+                }))}
+              />
+
+              <div className="flex flex-col items-center gap-4">
+                <ReadyToggle
+                  sessionId={sessionId}
+                  participantId={state.participant.id}
+                  displayName={state.participant.displayName}
+                  isReady={selfReady}
+                  onToggle={setSelfReady}
+                />
+                {allReady ? (
+                  <div role="status" aria-live="polite">
+                    <Badge variant="success">Everyone&apos;s ready — starting soon</Badge>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
+      </BoothFrame>
     </main>
   );
 }
