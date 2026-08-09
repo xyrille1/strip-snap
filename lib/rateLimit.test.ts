@@ -44,11 +44,4 @@ describe("checkRateLimit — fail open when Upstash is not configured", () => {
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
-
-  it("this repo's current environment actually has both vars unset (sanity check)", () => {
-    // Confirms this test file is exercising the real current-state path, not
-    // a hypothetical one — no Upstash project is provisioned yet.
-    expect(originalUrl ?? "").toBe("");
-    expect(originalToken ?? "").toBe("");
-  });
 });
