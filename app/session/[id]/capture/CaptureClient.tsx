@@ -596,53 +596,58 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
   }
 
   const blocked = cameraState === "denied" || cameraState === "unsupported";
+  const screenStatus: ScreenStatus =
+    countdownTarget !== null ? "countdown" : cameraState === "granted" ? "active" : "idle";
 
   return (
-    // Console screen: full-bleed on mobile (design brief §5) — no horizontal
-    // padding around the camera card below sm:, so the live preview runs
-    // edge-to-edge instead of sitting in a small centered card. Header text
-    // and the countdown/status row keep their own inset padding so only the
-    // camera view itself goes edge-to-edge.
-    <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center justify-center gap-6 py-8 sm:gap-8 sm:px-4 sm:py-16">
-      <div className="animate-fade-up px-4 text-center sm:px-0">
+    <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-8 sm:py-12">
+      <div className="animate-fade-up text-center">
         <p className="font-display text-sm italic text-rust-body">Capture</p>
-        <h1 className="mt-2 font-display text-4xl italic text-ink">
+        <h1 className="mt-2 font-display text-3xl italic text-ink sm:text-4xl">
           {blocked ? "Camera needed to continue" : "Hold still — the strip is coming"}
         </h1>
       </div>
 
-      {/* Instruction strip (design brief §5 / R-01): 3 columns at sm: and up,
-          a horizontal-scroll row below it. Same mobile-inset pattern as the
-          header/countdown above (px-4 sm:px-0) — `<main>` only supplies its
-          own sm:px-4, so mobile padding has to come from the child itself;
-          only the camera view below goes truly edge-to-edge on mobile. */}
-      <div className="w-full px-4 sm:px-0">
+      <BoothFrame
+        pose="active"
+        leftInstructions={CAPTURE_INSTRUCTIONS.map((item) => item.title)}
+        rightLabel="DEVELOP"
+        rightSublabel="Your strip is next"
+      >
+        <ScreenConsole
+          status={screenStatus}
+          controlDeck={
+            captured ? (
+              <div role="status" aria-live="polite" className="flex justify-center">
+                <Badge variant="success">
+                  Captured — waiting on the rest of the group ({capturedCount}/
+                  {Math.max(expectedCount, 1)})
+                </Badge>
+              </div>
+            ) : (
+              <p className="text-center font-sans text-xs text-ink-secondary">
+                {blocked ? "Camera unavailable" : "Everyone ready starts the countdown"}
+              </p>
+            )
+          }
+        >
+          <CameraView ref={videoRef} active onPermissionChange={setCameraState} />
+          {!blocked ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/10">
+              <Countdown targetTimestamp={countdownTarget} />
+            </div>
+          ) : null}
+        </ScreenConsole>
+      </BoothFrame>
+
+      {/* Instruction strip (design brief §5 / R-01), kept as the full-detail
+          fallback below lg: where BoothFrame's decorative left panel (which
+          only shows short titles) collapses out of view entirely. */}
+      <div className="w-full max-w-2xl lg:hidden">
         <Card className="p-6 sm:p-8">
           <NumberedList items={CAPTURE_INSTRUCTIONS} layout="columns" />
         </Card>
       </div>
-
-      {/* Plain div, not <Card>, so the mobile-vs-desktop border/radius can be
-          composed with additive breakpoint classes (border-y always,
-          border-x/rounded only added at sm:) instead of fighting Card's
-          fixed border-all + rounded-lg classes for specificity. */}
-      <div className="w-full overflow-hidden border-y border-hairline border-structural-gray bg-cream sm:rounded-card-lg sm:border-x">
-        <CameraView ref={videoRef} active onPermissionChange={setCameraState} />
-      </div>
-
-      {!blocked ? (
-        <div className="flex flex-col items-center gap-4 px-4 sm:px-0">
-          <Countdown targetTimestamp={countdownTarget} />
-          {captured ? (
-            <div role="status" aria-live="polite">
-              <Badge variant="success">
-                Captured — waiting on the rest of the group ({capturedCount}/
-                {Math.max(expectedCount, 1)})
-              </Badge>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </main>
   );
 }

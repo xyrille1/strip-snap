@@ -24,7 +24,7 @@ export default function StripView({ stripId, signedUrl }: StripViewProps) {
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-10 px-4 py-20">
-      <div className="text-center print:hidden">
+      <div className="animate-fade-up text-center print:hidden">
         <p className="font-display text-sm italic text-rust-body">Strip Snap</p>
         <h1 className="mt-2 font-display text-5xl italic text-ink">A shared strip</h1>
         <p className="mt-3 font-sans text-sm text-ink-secondary">
@@ -32,7 +32,7 @@ export default function StripView({ stripId, signedUrl }: StripViewProps) {
         </p>
       </div>
 
-      <div className="relative w-full max-w-sm">
+      <div className="relative w-full max-w-sm animate-fade-up">
         {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL, not a static/optimizable asset. */}
         <img
           src={signedUrl}

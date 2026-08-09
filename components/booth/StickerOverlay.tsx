@@ -29,6 +29,7 @@ export default function StickerOverlay({ visible }: StickerOverlayProps) {
       <HeartGlyph className="absolute -right-3 -top-3 h-10 w-10 rotate-6 text-rust-body" />
       <SparkleGlyph className="absolute -left-4 top-1/3 h-8 w-8 -rotate-12 text-forest" />
       <SparkleGlyph className="absolute bottom-6 right-6 h-6 w-6 rotate-12 text-rust-body" />
+      <ScissorsGlyph className="absolute -bottom-4 -right-4 h-9 w-9 -rotate-[18deg] text-ink-secondary" />
       <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 -rotate-2 rounded-full border border-hairline border-ink bg-cream px-3 py-1 font-display text-xs italic text-ink">
         tag me →
       </span>
@@ -48,6 +49,17 @@ function SparkleGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor">
       <path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2z" />
+    </svg>
+  );
+}
+
+/** Nods to the physical "cut your strip apart" ritual (design brief §3's filmstrip motif) — a quiet analog detail, not a functional cut control. */
+function ScissorsGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <path d="M8 7.5L20 19M8 16.5L20 5" strokeLinecap="round" />
     </svg>
   );
 }
