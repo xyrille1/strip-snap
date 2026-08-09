@@ -74,6 +74,39 @@ export async function getParticipantByUserAndSession(
   return data;
 }
 
+/**
+ * Renames an existing ANONYMOUS participant row in place — the invite-mode
+ * counterpart of solo mode's identity hand-off (see
+ * app/session/new/ModeSelectClient.tsx's doc comment). Used when a client
+ * that already has a stored identity for this session (most often the
+ * session creator, whose `Host` row `POST /api/sessions` already inserted)
+ * submits a chosen display name from the waiting room — updates that row
+ * instead of `addParticipant` creating a second, disconnected row for the
+ * same physical person. Scoped to `user_id is null`: a logged-in user's row
+ * is never repurposed this way, since that identity is already resolved via
+ * `getParticipantByUserAndSession`. Returns `null` (not an error) when `id`
+ * doesn't match any anonymous row in this session, so callers can fall back
+ * to creating a fresh row.
+ */
+export async function renameAnonymousParticipant(
+  sessionId: string,
+  id: string,
+  displayName: string
+): Promise<ParticipantRow | null> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("participants")
+    .update({ display_name: displayName })
+    .eq("id", id)
+    .eq("session_id", sessionId)
+    .is("user_id", null)
+    .select()
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function updateParticipantStatus(
   id: string,
   status: ParticipantRow["status"]

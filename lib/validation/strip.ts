@@ -29,18 +29,18 @@ const IMAGE_DATA_URL_PREFIX = /^data:image\/(png|jpeg);base64,/;
  *
  * Derived from the actual canvas geometry (lib/compositor.ts) and encoding
  * (lib/compositeStrip.ts), not guessed:
- * - Canvas is fixed at SLOT_WIDTH(480) + CANVAS_MARGIN(24)*2 = 528px wide.
+ * - Canvas is fixed at SLOT_WIDTH(360) + CANVAS_MARGIN(24)*2 = 408px wide.
  * - Tallest case is format '4' (4 slots): CANVAS_MARGIN(24)*2 +
- *   4*SLOT_HEIGHT(360) + 3*SLOT_GUTTER(16) = 1536px tall.
+ *   4*SLOT_HEIGHT(480) + 3*SLOT_GUTTER(16) = 2016px tall.
  *   (participantCount only subdivides a slot internally -- lib/compositor.ts's
  *   computeSubRegions -- it never changes canvasWidth/canvasHeight.)
- * - Worst-case raw RGBA bitmap: 528 * 1536 * 4 bytes ~= 3.09 MiB.
+ * - Worst-case raw RGBA bitmap: 408 * 2016 * 4 bytes ~= 3.14 MiB.
  * - compositeStripToDataUrl defaults to PNG (lossless); base64 inflates raw
- *   bytes by 4/3 ~= 4.12 MiB. PNG's deflate framing can only add a small,
+ *   bytes by 4/3 ~= 4.19 MiB. PNG's deflate framing can only add a small,
  *   bounded overhead over raw even for incompressible content (a filter byte
- *   per scanline + zlib's ~0.4% "stored block" worst case), so ~4.2 MiB is a
+ *   per scanline + zlib's ~0.4% "stored block" worst case), so ~4.3 MiB is a
  *   realistic ceiling for this app's actual output.
- * - Capped at 8 MiB (8 * 1024 * 1024 chars) here: ~2x that ceiling, enough
+ * - Capped at 8 MiB (8 * 1024 * 1024 chars) here: ~1.9x that ceiling, enough
  *   headroom for browser/encoder variance without materially loosening the
  *   cap -- still firmly rejects the unbounded payloads the audit flagged.
  */
