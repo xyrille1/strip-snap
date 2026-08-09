@@ -17,7 +17,7 @@ const VARIANT_CLASSES: Record<"default" | "success" | "warning", string> = {
 export default function Badge({ children, variant = "default" }: BadgeProps) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border border-hairline px-2.5 py-0.5 text-xs font-medium font-sans ${VARIANT_CLASSES[variant]}`}
+      className={`inline-flex items-center rounded-full border-booth-inner px-2.5 py-0.5 text-xs font-medium font-sans ${VARIANT_CLASSES[variant]}`}
     >
       {children}
     </span>

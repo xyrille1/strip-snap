@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import OutputActions from "@/components/booth/OutputActions";
 import StickerOverlay from "@/components/booth/StickerOverlay";
+import Photostrip from "@/components/booth3d/Photostrip";
 import { loadGeneratedStripId } from "@/lib/stripStorage";
 
 export interface OutputClientProps {
@@ -91,19 +92,17 @@ export default function OutputClient({ sessionId }: OutputClientProps) {
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-10 px-4 py-20">
-      <div className="text-center print:hidden">
+      <div className="animate-fade-up text-center print:hidden">
         <p className="font-display text-sm italic text-rust-body">Your strip</p>
         <h1 className="mt-2 font-display text-5xl italic text-ink">Ready</h1>
       </div>
 
-      <div className="relative w-full max-w-sm">
-        {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL, not a static/optimizable asset. */}
-        <img
+      <div className="animate-fade-up">
+        <Photostrip
           src={strip.signedUrl}
           alt="Your finished photo strip"
-          className="mx-auto block w-full rounded-card-lg border border-hairline border-structural-gray bg-film-black p-2"
+          overlay={<StickerOverlay visible={stickersVisible} />}
         />
-        <StickerOverlay visible={stickersVisible} />
       </div>
 
       <Button

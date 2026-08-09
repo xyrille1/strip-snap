@@ -40,7 +40,7 @@ export default function MarketingPage() {
     <main className="min-h-[100dvh] px-4 py-12 sm:px-8 sm:py-16 lg:px-16">
       <div className="mx-auto flex max-w-6xl flex-col gap-16">
         {/* Marquee */}
-        <header>
+        <header className="animate-fade-up">
           <p className="font-sans text-xs font-semibold uppercase tracking-[0.2em] text-ink-secondary">
             An online photobooth
           </p>

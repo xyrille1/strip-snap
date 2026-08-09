@@ -7,6 +7,7 @@ import { addParticipant } from "@/lib/db/participants";
 import { getOrCreateByClerkId } from "@/lib/db/appUsers";
 import { resolveClientIp } from "@/lib/http/clientIp";
 import { trackEvent } from "@/lib/analytics";
+import { mintRealtimeToken } from "@/lib/realtimeAuth";
 
 // backend-schema.md §5: "e.g., 10 session creations/hour/IP" — cheap anti-abuse
 // threshold for a free-tier deploy, not a hard product requirement.
@@ -60,11 +61,20 @@ export async function POST(request: NextRequest) {
 
   const session = await createSession({ mode: parsed.data.mode, hostUserId });
 
-  await addParticipant({
+  const hostParticipant = await addParticipant({
     sessionId: session.id,
     userId: hostUserId,
     displayName: DEFAULT_HOST_DISPLAY_NAME,
   });
+
+  // Minted here (not deferred to /join) so solo mode's client can store this
+  // identity directly and never call /join at all — see ModeSelectClient's
+  // doc comment. Without this, solo's own /capture identity-resolution
+  // effect had no stored participant to find and fell back to POSTing
+  // /join itself, producing a second, disconnected participant row for the
+  // same physical person (QA finding, 2026-08-06: "solo strips render as a
+  // mostly-empty grid").
+  const hostRealtimeToken = await mintRealtimeToken(session.id, hostParticipant.id);
 
   // TRD item 9a / implementation-plan Phase 11: fire-and-record only after
   // the session (and its host participant row) actually exist. Reuses the
@@ -86,6 +96,13 @@ export async function POST(request: NextRequest) {
       // a fully-qualified URL. Solo mode's own client ignores this and
       // navigates straight to /capture instead (flows.md §1a).
       join_url: `/session/${session.id}/waiting`,
+      // Solo mode's ModeSelectClient stores this as its identity before
+      // navigating to /capture, same shape as /join's response, so it never
+      // needs to call /join itself. Invite mode's client currently ignores
+      // this field — every invite participant (including the host) still
+      // names themselves and joins explicitly from the waiting room.
+      participant: { id: hostParticipant.id, display_name: hostParticipant.display_name },
+      realtimeToken: hostRealtimeToken,
     },
     { status: 201 }
   );

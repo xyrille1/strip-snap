@@ -109,7 +109,7 @@ export default function StyleClient({ sessionId }: StyleClientProps) {
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-3xl flex-col items-center gap-8 px-4 py-16">
-      <div className="text-center">
+      <div className="animate-fade-up text-center">
         <p className="font-display text-sm italic text-rust-body">Style</p>
         <h1 className="mt-2 font-display text-4xl italic text-ink">Pick a look</h1>
         <p className="mt-2 font-sans text-sm text-ink-secondary">

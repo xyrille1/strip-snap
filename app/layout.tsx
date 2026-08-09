@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { Playfair_Display, Space_Grotesk } from "next/font/google";
+import { Playfair_Display, Quicksand, Space_Grotesk } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import BoothThemeProvider from "@/components/booth3d/BoothThemeProvider";
 import "./globals.css";
 
-// Display / marquee / countdown — serif, italic-capable, per
-// docs/online-photobooth-uiux-design-brief.md §2.
+// Display / marquee / countdown — serif, italic-capable, the "classic"
+// theme's default (docs/goal-ui.md).
 const fontDisplay = Playfair_Display({
   subsets: ["latin"],
   style: ["normal", "italic"],
@@ -13,12 +14,22 @@ const fontDisplay = Playfair_Display({
   display: "swap",
 });
 
-// UI / instructional / buttons / labels — clean grotesque sans, per
-// docs/online-photobooth-uiux-design-brief.md §2.
+// UI / instructional / buttons / labels — the "classic" theme's default sans.
 const fontSans = Space_Grotesk({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
+  display: "swap",
+});
+
+// Rounded, friendly sans used only by the "kawaii" theme (app/globals.css'
+// [data-theme="kawaii"] block) — kept as its own next/font var rather than
+// swapping fontDisplay/fontSans's family outright so the classic/neon themes
+// never pay for or reference this font at all.
+const fontKawaii = Quicksand({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-kawaii",
   display: "swap",
 });
 
@@ -37,9 +48,9 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body
-          className={`${fontDisplay.variable} ${fontSans.variable} font-sans antialiased`}
+          className={`${fontDisplay.variable} ${fontSans.variable} ${fontKawaii.variable} font-sans antialiased`}
         >
-          {children}
+          <BoothThemeProvider>{children}</BoothThemeProvider>
         </body>
       </html>
     </ClerkProvider>

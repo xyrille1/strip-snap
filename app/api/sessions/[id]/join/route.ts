@@ -8,6 +8,7 @@ import { getSessionById } from "@/lib/db/sessions";
 import {
   addParticipant,
   getParticipantByUserAndSession,
+  renameAnonymousParticipant,
   UniqueParticipantError,
 } from "@/lib/db/participants";
 import { getOrCreateByClerkId } from "@/lib/db/appUsers";
@@ -31,9 +32,11 @@ const JOIN_SESSION_RATE_LIMIT = { limit: 30, windowSeconds: 60 * 60 };
  * (lib/realtimeAuth.ts) -> { participant, realtimeToken }.
  *
  * Status code convention: 201 for a brand-new participant row, 200 when an already-joined
- * logged-in user re-joins and gets back their existing row plus a freshly minted token.
- * Anonymous participants (`user_id: null`) are exempt from the unique constraint per
- * backend-schema §3.3, so every anonymous join always creates a new row (201).
+ * logged-in user re-joins (or an anonymous caller with a stored `participantId` gets their
+ * existing row renamed — see `renameAnonymousParticipant`'s doc comment) and gets back their
+ * existing row plus a freshly minted token. Anonymous participants (`user_id: null`) are
+ * exempt from the unique constraint per backend-schema §3.3, so a first-time anonymous join
+ * (no `participantId`) always creates a new row (201).
  */
 export async function POST(
   request: NextRequest,
@@ -107,13 +110,33 @@ export async function POST(
       }
     }
   } else {
-    // Anonymous participants are exempt from the unique constraint (backend-schema §3.3) —
-    // always a fresh row.
-    participant = await addParticipant({
-      sessionId: session.id,
-      userId: null,
-      displayName: parsedBody.data.displayName,
-    });
+    // Anonymous participants are exempt from the unique constraint
+    // (backend-schema §3.3). If this client already has a stored identity
+    // for this session (`participantId` — most often the session creator's
+    // own `Host` row from `POST /api/sessions`, see
+    // lib/db/participants.ts#renameAnonymousParticipant's doc comment),
+    // rename that row in place instead of creating a second, disconnected
+    // one for the same physical person. Falls back to a fresh row when no
+    // `participantId` was sent, or it didn't match anything renameable —
+    // the pre-existing behavior for a genuine first-time joiner.
+    const renamed = parsedBody.data.participantId
+      ? await renameAnonymousParticipant(
+          session.id,
+          parsedBody.data.participantId,
+          parsedBody.data.displayName
+        )
+      : null;
+
+    if (renamed) {
+      participant = renamed;
+      isNewJoin = false;
+    } else {
+      participant = await addParticipant({
+        sessionId: session.id,
+        userId: null,
+        displayName: parsedBody.data.displayName,
+      });
+    }
   }
 
   const realtimeToken = await mintRealtimeToken(session.id, participant.id);
