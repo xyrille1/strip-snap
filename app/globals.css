@@ -47,3 +47,12 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Respect reduced-motion for the fade-up entrance (tailwind.config.ts) — a
+   user who's asked for less motion gets the header at its resting state
+   immediately, not a suppressed-but-still-computed animation. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up {
+    animation: none;
+  }
+}

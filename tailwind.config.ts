@@ -50,6 +50,19 @@ const config: Config = {
         // 1px hairline used for card borders / dividers throughout the brief.
         hairline: "1px",
       },
+      keyframes: {
+        // Quiet entrance for screen headers/heroes — opacity + a small
+        // translate only (never width/height/color), matching the brief's
+        // "quiet, patient tone" rather than a flashy/bouncy reveal. Disabled
+        // under `prefers-reduced-motion` in globals.css.
+        "fade-up": {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-up": "fade-up 0.5s ease-out both",
+      },
     },
   },
   plugins: [],

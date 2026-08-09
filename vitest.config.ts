@@ -13,5 +13,11 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./vitest.setup.ts"],
+    // Integration tests share one local Supabase (Docker) stack across many
+    // concurrent test files; under load (esp. Docker Desktop on Windows)
+    // round-trips that take <150ms in isolation can exceed the 5s default
+    // when dozens of files hit it at once. 20s gives real headroom without
+    // masking an actually-hung request.
+    testTimeout: 20000,
   },
 });
