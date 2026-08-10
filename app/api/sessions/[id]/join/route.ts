@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { joinSessionSchema } from "@/lib/validation/participant";
 import { sessionIdParamSchema } from "@/lib/validation/session";
@@ -65,84 +66,89 @@ export async function POST(
     );
   }
 
-  const session = await getSessionById(parsedParams.data.id);
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
+  try {
+    const session = await getSessionById(parsedParams.data.id);
+    if (!session) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
 
-  // Joining never requires login (PRD/TRD — login only gates the 4-photo upgrade). If the
-  // joiner happens to have a Clerk session, record them so the unique(session_id, user_id)
-  // constraint and re-join handling below can apply.
-  const { userId: clerkId } = await auth();
-  let appUserId: string | null = null;
-  if (clerkId) {
-    const appUser = await getOrCreateByClerkId(clerkId);
-    appUserId = appUser.id;
-  }
+    // Joining never requires login (PRD/TRD — login only gates the 4-photo upgrade). If the
+    // joiner happens to have a Clerk session, record them so the unique(session_id, user_id)
+    // constraint and re-join handling below can apply.
+    const { userId: clerkId } = await auth();
+    let appUserId: string | null = null;
+    if (clerkId) {
+      const appUser = await getOrCreateByClerkId(clerkId);
+      appUserId = appUser.id;
+    }
 
-  let participant: ParticipantRow;
-  let isNewJoin = true;
+    let participant: ParticipantRow;
+    let isNewJoin = true;
 
-  if (appUserId) {
-    const existing = await getParticipantByUserAndSession(session.id, appUserId);
-    if (existing) {
-      participant = existing;
-      isNewJoin = false;
-    } else {
-      try {
-        participant = await addParticipant({
-          sessionId: session.id,
-          userId: appUserId,
-          displayName: parsedBody.data.displayName,
-        });
-      } catch (err) {
-        // Race fallback: two concurrent join requests for the same logged-in user both pass
-        // the `existing` check above, then one insert wins and the other hits the unique
-        // constraint. Re-fetch and return the row the winning request created instead of 500ing.
-        if (err instanceof UniqueParticipantError) {
-          const winner = await getParticipantByUserAndSession(session.id, appUserId);
-          if (!winner) throw err;
-          participant = winner;
-          isNewJoin = false;
-        } else {
-          throw err;
+    if (appUserId) {
+      const existing = await getParticipantByUserAndSession(session.id, appUserId);
+      if (existing) {
+        participant = existing;
+        isNewJoin = false;
+      } else {
+        try {
+          participant = await addParticipant({
+            sessionId: session.id,
+            userId: appUserId,
+            displayName: parsedBody.data.displayName,
+          });
+        } catch (err) {
+          // Race fallback: two concurrent join requests for the same logged-in user both pass
+          // the `existing` check above, then one insert wins and the other hits the unique
+          // constraint. Re-fetch and return the row the winning request created instead of 500ing.
+          if (err instanceof UniqueParticipantError) {
+            const winner = await getParticipantByUserAndSession(session.id, appUserId);
+            if (!winner) throw err;
+            participant = winner;
+            isNewJoin = false;
+          } else {
+            throw err;
+          }
         }
       }
-    }
-  } else {
-    // Anonymous participants are exempt from the unique constraint
-    // (backend-schema §3.3). If this client already has a stored identity
-    // for this session (`participantId` — most often the session creator's
-    // own `Host` row from `POST /api/sessions`, see
-    // lib/db/participants.ts#renameAnonymousParticipant's doc comment),
-    // rename that row in place instead of creating a second, disconnected
-    // one for the same physical person. Falls back to a fresh row when no
-    // `participantId` was sent, or it didn't match anything renameable —
-    // the pre-existing behavior for a genuine first-time joiner.
-    const renamed = parsedBody.data.participantId
-      ? await renameAnonymousParticipant(
-          session.id,
-          parsedBody.data.participantId,
-          parsedBody.data.displayName
-        )
-      : null;
-
-    if (renamed) {
-      participant = renamed;
-      isNewJoin = false;
     } else {
-      participant = await addParticipant({
-        sessionId: session.id,
-        userId: null,
-        displayName: parsedBody.data.displayName,
-      });
+      // Anonymous participants are exempt from the unique constraint
+      // (backend-schema §3.3). If this client already has a stored identity
+      // for this session (`participantId` — most often the session creator's
+      // own `Host` row from `POST /api/sessions`, see
+      // lib/db/participants.ts#renameAnonymousParticipant's doc comment),
+      // rename that row in place instead of creating a second, disconnected
+      // one for the same physical person. Falls back to a fresh row when no
+      // `participantId` was sent, or it didn't match anything renameable —
+      // the pre-existing behavior for a genuine first-time joiner.
+      const renamed = parsedBody.data.participantId
+        ? await renameAnonymousParticipant(
+            session.id,
+            parsedBody.data.participantId,
+            parsedBody.data.displayName
+          )
+        : null;
+
+      if (renamed) {
+        participant = renamed;
+        isNewJoin = false;
+      } else {
+        participant = await addParticipant({
+          sessionId: session.id,
+          userId: null,
+          displayName: parsedBody.data.displayName,
+        });
+      }
     }
+
+    const realtimeToken = await mintRealtimeToken(session.id, participant.id);
+
+    return NextResponse.json(
+      { participant, realtimeToken },
+      { status: isNewJoin ? 201 : 200 }
+    );
+  } catch (error) {
+    Sentry.captureException(error, { tags: { area: "api", route: "sessions:join" } });
+    return NextResponse.json({ error: "Failed to join session" }, { status: 500 });
   }
-
-  const realtimeToken = await mintRealtimeToken(session.id, participant.id);
-
-  return NextResponse.json(
-    { participant, realtimeToken },
-    { status: isNewJoin ? 201 : 200 }
-  );
 }

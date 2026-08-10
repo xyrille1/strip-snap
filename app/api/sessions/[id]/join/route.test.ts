@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { jwtVerify } from "jose";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { POST } from "./route";
-import { createSession, deleteSession } from "@/lib/db/sessions";
+import { createSession, deleteSession, getSessionById } from "@/lib/db/sessions";
 import { getParticipantsForSession } from "@/lib/db/participants";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
@@ -17,8 +17,17 @@ vi.mock("@/lib/rateLimit", () => ({
   checkRateLimit: vi.fn(),
 }));
 
+// Partial mock, same technique as app/api/sessions/route.test.ts: every
+// other export stays real/live, only `getSessionById` is wrapped so one test
+// can force it to reject and exercise the route's catch block.
+vi.mock("@/lib/db/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/sessions")>();
+  return { ...actual, getSessionById: vi.fn(actual.getSessionById) };
+});
+
 const mockedAuth = vi.mocked(auth);
 const mockedCheckRateLimit = vi.mocked(checkRateLimit);
+const mockedGetSessionById = vi.mocked(getSessionById);
 
 function joinRequest(
   body: unknown,
@@ -205,5 +214,19 @@ describe("POST /api/sessions/:id/join (integration, live local Supabase, Clerk a
 
     const participants = await getParticipantsForSession(session.id);
     expect(participants).toHaveLength(1);
+  });
+
+  it("returns 500 with the app's JSON error shape when an unexpected DB error is thrown", async () => {
+    const session = await createSession({ mode: "invite", hostUserId: null });
+    sessionId = session.id;
+    mockedGetSessionById.mockRejectedValueOnce(new Error("boom"));
+
+    const response = await POST(joinRequest({ displayName: "Guest" }), {
+      params: { id: session.id },
+    });
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Failed to join session" });
   });
 });
