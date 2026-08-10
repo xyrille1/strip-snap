@@ -37,3 +37,17 @@ if (dsn) {
     "[sentry] SENTRY_DSN is not set — client-side error tracking is disabled until a Sentry project is provisioned."
   );
 }
+
+/**
+ * Router-navigation instrumentation hook. @sentry/nextjs looks for this
+ * export by name on the client instrumentation file and warns loudly at
+ * startup when it's missing; without it, App Router client-side navigations
+ * aren't tied to the errors they produce, so a crash on /session/:id/style
+ * reports with whatever route the user first landed on.
+ *
+ * Exported unconditionally, unlike the `Sentry.init()` above: it's just a
+ * function reference, and `captureRouterTransitionStart` is a no-op when the
+ * SDK was never initialised (the empty-DSN case this file already guards
+ * for), so there's no init-order dependency to get wrong here.
+ */
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
