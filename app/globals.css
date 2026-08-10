@@ -3,17 +3,11 @@
 @tailwind utilities;
 
 /*
- * Booth theme tokens — docs/goal-ui.md's 3D photobooth reference (classic
- * sketch / neon cyberpunk / kawaii pastel). Every color/border/radius/shadow
- * token that needs to swap per theme lives here as a CSS custom property;
- * tailwind.config.ts's color/borderWidth/borderRadius/boxShadow extensions
- * just point at these vars, so switching `data-theme` on <html> re-themes
- * every already-styled component with zero per-component JS. `--booth-font-*`
- * are a level of indirection on top of next/font's own `--font-*` vars
- * (set via layout.tsx's className) so a theme can swap fonts without fighting
- * next/font's generated stylesheet for cascade priority on the SAME
- * property — :root's default just points at next/font's var; only the
- * indirection var gets overridden per theme.
+ * Booth tokens — the "Classic Sketch" look from docs/goal-ui.md: off-white
+ * paper, thick black borders/radius-0 chrome, a hard offset shadow. Kept as
+ * CSS custom properties (rather than plain hex in tailwind.config.ts) purely
+ * so every booth-shell component can reference one token set; there is only
+ * one theme, no runtime switching.
  */
 :root {
   --booth-bg: #f5f6f8;
@@ -28,52 +22,15 @@
   --booth-shadow: 6px 6px 0 0 rgba(0, 0, 0, 1);
   --booth-forest: #33422e;
   --booth-rust: #8c3a1d;
-  --booth-font-display: var(--font-display);
-  --booth-font-sans: var(--font-sans);
 
   --background: var(--booth-bg);
   --foreground: var(--booth-ink);
 }
 
-:root[data-theme="neon"] {
-  --booth-bg: #050505;
-  --booth-panel: #1a1a24;
-  --booth-screen: #000000;
-  --booth-ink: #67e8f9;
-  --booth-ink-secondary: #7dd3fc;
-  --booth-border: #22d3ee;
-  --booth-border-width: 2px;
-  --booth-border-width-inner: 1px;
-  --booth-radius: 8px;
-  --booth-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
-  /* Forest/rust brighten for neon's dark panel — the default dark tones
-     (tuned for a white/cream panel) would nearly disappear against #1a1a24. */
-  --booth-forest: #4ade80;
-  --booth-rust: #f472b6;
-  --booth-font-display: "Courier New", Courier, monospace;
-  --booth-font-sans: "Courier New", Courier, monospace;
-}
-
-:root[data-theme="kawaii"] {
-  --booth-bg: #fdf2f8;
-  --booth-panel: #ffffff;
-  --booth-screen: #fce7f3;
-  --booth-ink: #7e22ce;
-  --booth-ink-secondary: #a855f7;
-  --booth-border: #f9a8d4;
-  --booth-border-width: 4px;
-  --booth-border-width-inner: 3px;
-  --booth-radius: 32px;
-  --booth-shadow: 0 10px 25px rgba(244, 114, 182, 0.3);
-  --booth-font-display: var(--font-kawaii), "Nunito", sans-serif;
-  --booth-font-sans: var(--font-kawaii), "Nunito", sans-serif;
-}
-
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--booth-font-sans), Helvetica, Arial, sans-serif;
-  transition: background-color 0.4s ease, color 0.4s ease;
+  font-family: var(--font-sans), Helvetica, Arial, sans-serif;
 }
 
 /*
@@ -103,5 +60,15 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up {
     animation: none;
+  }
+
+  /* The booth's 1s 3D pose swing (components/booth3d/BoothFrame.tsx) is the
+     largest movement on the site — a full perspective rotation of the whole
+     shell. Reduced-motion users still get the final tilted pose, it just
+     snaps there instead of swinging. Targeted via a class rather than the
+     inline `transform` because a media query can't override an inline
+     style, only the transition that animates it. */
+  .booth-pose {
+    transition: none;
   }
 }
