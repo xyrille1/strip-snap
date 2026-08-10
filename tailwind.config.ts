@@ -1,13 +1,13 @@
 import type { Config } from "tailwindcss";
 
-// Palette, type, radius, border, and shadow tokens for the 3D-photobooth
-// theme system (docs/goal-ui.md — classic sketch / neon cyberpunk / kawaii
-// pastel). Every themeable value is a CSS custom property (defined per
-// `[data-theme]` in app/globals.css) so switching themes re-paints every
-// component built from these tokens without per-component JS. `rust`/
-// `film-black` stay static: `rust` is unused (display-only reservation
-// from the prior design brief) and `film-black` represents the physical
-// photo-strip material itself, which stays near-black regardless of theme.
+// Palette, type, radius, border, and shadow tokens for the "Classic Sketch"
+// 3D-photobooth look (docs/goal-ui.md): off-white paper, thick black
+// borders, hard offset shadow, radius-0 chrome. Colors/border/radius/shadow
+// are CSS custom properties (app/globals.css's `:root`) rather than plain
+// hex purely so every booth-shell component shares one token set — there is
+// one token set. `rust`/`film-black` stay static hex: `rust` is unused
+// (display-only reservation from the prior design brief) and `film-black`
+// represents the physical photo-strip material itself.
 const config: Config = {
   content: [
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
@@ -18,9 +18,8 @@ const config: Config = {
     extend: {
       colors: {
         // Page background — also doubles as the "on-accent" text color for
-        // illuminated fills (bg-forest text-cream etc.), same dual role it
-        // already played before theming: each theme's bg is chosen as the
-        // legible contrast tone against that theme's forest/rust fills.
+        // illuminated fills (bg-forest text-cream etc.), since it's the
+        // legible contrast tone against the forest/rust fills.
         cream: "var(--booth-bg)",
         // Card/panel surface — distinct from the page background.
         panel: "var(--booth-panel)",
@@ -43,13 +42,14 @@ const config: Config = {
         "film-black": "#141210",
       },
       fontFamily: {
-        // Serif/handwriting-ish display — marquee wordmark, screen headlines,
-        // countdown text. Swaps per theme via --booth-font-display.
-        display: ["var(--booth-font-display)", "Georgia", "Cambria", "serif"],
-        // UI / instructional copy, buttons, labels. Swaps per theme via
-        // --booth-font-sans.
+        // Hand-drawn — marquee wordmark, screen headlines, countdown text.
+        // Fallbacks stay in the same casual-handwriting register as
+        // Architects Daughter (app/layout.tsx) so a font-load failure
+        // degrades to something still sketch-like rather than a serif.
+        display: ["var(--font-display)", "Segoe Print", "Bradley Hand", "cursive"],
+        // UI / instructional copy, buttons, labels.
         sans: [
-          "var(--booth-font-sans)",
+          "var(--font-sans)",
           "Helvetica Neue",
           "Helvetica",
           "Arial",
@@ -57,22 +57,19 @@ const config: Config = {
         ],
       },
       borderRadius: {
-        // Card radius scale, still used by a few not-yet-themed surfaces.
-        card: "12px",
-        "card-lg": "16px",
-        // Themed radius — 0 (classic) / 8px (neon) / 32px (kawaii).
+        // Booth-shell radius (0 — sharp corners, per the sketch look). The
+        // old `card`/`card-lg` 12/16px scale is gone: every surface is booth
+        // chrome now, and a stray rounded corner reads as a bug against it.
         booth: "var(--booth-radius)",
       },
       borderWidth: {
-        // 1px hairline, still used by a few not-yet-themed surfaces.
-        hairline: "1px",
-        // Themed outer border weight.
+        // Booth-shell outer border weight (the heavy sketch outline).
         booth: "var(--booth-border-width)",
-        // Themed inner/decorative border weight (booth-shell chrome).
+        // Booth-shell inner/decorative border weight.
         "booth-inner": "var(--booth-border-width-inner)",
       },
       boxShadow: {
-        // Themed shadow — hard offset (classic) / glow (neon) / soft (kawaii).
+        // Booth-shell hard offset shadow.
         booth: "var(--booth-shadow)",
       },
       keyframes: {
