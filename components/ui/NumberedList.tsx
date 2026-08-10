@@ -51,7 +51,7 @@ export default function NumberedList({
         <li key={item.title} className={itemClassName}>
           <span
             aria-hidden="true"
-            className="mt-0.5 shrink-0 font-display text-lg italic text-rust-body tabular-nums"
+            className="mt-0.5 shrink-0 font-display text-lg text-rust-body tabular-nums"
           >
             {String(index + 1).padStart(2, "0")}
           </span>

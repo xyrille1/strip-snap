@@ -5,10 +5,20 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /**
    * "default": outlined pill, per design brief §2 — "never filled blocks
    * except the single primary CTA per screen."
+   * "primary": that one permitted filled block — forest fill, cream label,
+   * hard offset shadow. The `<button>` counterpart to `CtaLink` below.
    * "illuminated": soft-glow filled circle, the recurring select/record/
    * pick-up motif from design brief §4.
+   *
+   * `primary` exists because passing `className="bg-forest text-cream"` to a
+   * `default` button DOES NOT WORK: Tailwind resolves conflicts by stylesheet
+   * order, not by the order classes appear in the attribute, and
+   * `bg-transparent`/`text-ink` from DEFAULT_CLASSES win. Three screens
+   * (style, preview, generate) shipped their "continue" CTA that way and
+   * silently rendered a plain outlined button instead of the primary
+   * treatment — caught in the 2026-08-09 QA pass by reading computed styles.
    */
-  variant?: "default" | "illuminated";
+  variant?: "default" | "primary" | "illuminated";
   /**
    * Illuminated-only. forest = confirm/select, rust = active/recording
    * (design brief §4). Color-configurable by design — callers are
@@ -34,17 +44,22 @@ const BASE_CLASSES =
 // visually-tighter py-2.5) so the rendered height clears the ~44px touch
 // target guideline on mobile (test-plan R-01/R-03's "tap targets large
 // enough") without needing every call site to opt in individually. Border
-// weight is the themed booth token (tailwind.config.ts) — 3px/2px/4px per
-// theme — the pill shape itself stays fixed across all three themes.
+// weight is the booth token (tailwind.config.ts) — the same heavy sketch
+// outline the panels and cards use, so a button reads as booth hardware.
 const DEFAULT_CLASSES =
   "rounded-full border-booth border-ink bg-transparent px-6 py-3 text-sm font-medium text-ink hover:bg-ink hover:text-cream";
 
-// Illuminated fills use forest/rust-body — both themed CSS-var tokens
-// (tailwind.config.ts) that stay AA-safe against each theme's own panel
-// background (see app/globals.css's per-theme forest/rust overrides). The
-// glow itself is the shared themed shadow (hard offset / cyan-pink glow /
-// soft drop) rather than a per-color rgba, since the underlying colors are
-// no longer static hex values.
+// The single filled CTA a screen is allowed (design brief §2). Same geometry
+// as DEFAULT_CLASSES so the two read as one family, and the same forest/cream
+// pairing CTA_CLASSES uses for the navigational version.
+const PRIMARY_CLASSES =
+  "rounded-full border-booth border-forest bg-forest px-6 py-3 text-sm font-semibold text-cream shadow-booth hover:bg-forest/90";
+
+// Illuminated fills use forest/rust-body — CSS-var tokens
+// (tailwind.config.ts / app/globals.css) chosen to stay AA-safe against the
+// white panel behind them. The "glow" is the booth's hard offset shadow
+// rather than a soft per-color rgba: in the sketch look nothing blurs, so an
+// illuminated control reads as raised by its drop-line, not by a halo.
 const ILLUMINATED_COLOR_CLASSES: Record<"forest" | "rust", string> = {
   forest: "bg-forest text-cream shadow-booth",
   rust: "bg-rust-body text-cream shadow-booth",
@@ -117,7 +132,11 @@ export default function Button({
     <button
       type="button"
       {...props}
-      className={[BASE_CLASSES, DEFAULT_CLASSES, className]
+      className={[
+        BASE_CLASSES,
+        variant === "primary" ? PRIMARY_CLASSES : DEFAULT_CLASSES,
+        className,
+      ]
         .filter(Boolean)
         .join(" ")}
     >

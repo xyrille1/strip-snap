@@ -24,6 +24,9 @@ If a staging environment becomes necessary later (e.g., before a schema migratio
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Client                                                 | Public                                                                |
 | `SENTRY_DSN`                        | Error tracking (§4)                                    | Secret (write-only DSN, low risk but keep server-side where possible) |
 | `UPSTASH_REDIS_URL` / token         | Rate limiting (per backend schema §5)                  | **Secret**                                                            |
+| `SUPABASE_JWT_SECRET`               | Signs Realtime Authorization tokens (`lib/realtimeAuth.ts`) | **Secret**                                                        |
+| `CRON_SECRET`                       | Bearer-auth for `/api/cron/*` (`lib/cronAuth.ts`)      | **Secret**                                                            |
+| `NEXT_PUBLIC_SITE_URL`              | `metadataBase` for shared-link OG tags (`app/layout.tsx`) | Public                                                             |
 
 All secrets live in Vercel's Environment Variables UI, scoped per environment (Preview vs. Production get separate Supabase projects/keys — never share a production database with preview deploys, to avoid preview traffic polluting production data or hitting production rate limits).
 
@@ -81,6 +84,10 @@ Vercel's own build step is the deploy gate; this CI workflow is a faster, cheape
 
 For a solo/small-team MVP, this is intentionally short — not a formal on-call process:
 
+0. Hit `GET /api/health` — cheapest signal that the app is up and can reach
+   the database. `{ status: "ok" }` (200) rules out a total outage/DB
+   connectivity failure before digging into Sentry/Vercel logs for a
+   narrower issue; `{ status: "error" }` (503) points straight at Supabase.
 1. Check Sentry for the error signature.
 2. Check Vercel deployment logs for the affected function/route.
 3. If caused by a bad deploy — roll back via Vercel dashboard (§3), near-instant.

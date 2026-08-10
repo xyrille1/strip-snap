@@ -5,10 +5,10 @@ export interface CardProps {
   className?: string;
 }
 
-// Themed panel surface — booth-shell tokens (tailwind.config.ts /
-// app/globals.css): border weight, radius, and shadow all swap per theme
-// (docs/goal-ui.md's classic/neon/kawaii), from a hard offset shadow to a
-// glow to a soft drop shadow.
+// Panel surface in the booth's own chrome (tailwind.config.ts /
+// app/globals.css): white panel, heavy black outline, zero radius, and the
+// hard offset shadow that gives the "Classic Sketch" look its drawn, cut-out
+// feel (docs/goal-ui.md). Every card on the site is a piece of the booth.
 const CARD_CLASSES =
   "rounded-booth border-booth border-structural-gray bg-panel shadow-booth";
 
