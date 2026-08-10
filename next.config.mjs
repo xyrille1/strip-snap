@@ -2,14 +2,6 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  images: {
-    remotePatterns: [
-      // Landing-page filmstrip placeholder imagery only (no real strips
-      // exist yet — docs/online-photobooth-implementation-plan.md Phase 3).
-      // Swap/remove once real strip thumbnails are available.
-      { protocol: "https", hostname: "picsum.photos" },
-    ],
-  },
   // Re-exposes SENTRY_DSN (server-side-only by default) into the client
   // bundle under its own name, so instrumentation-client.ts can read the
   // same var name the server/edge configs use instead of requiring a
@@ -18,6 +10,18 @@ const nextConfig = {
   // doc comment).
   env: {
     SENTRY_DSN: process.env.SENTRY_DSN,
+  },
+  // The machine running this dev server is memory-constrained. Webpack's
+  // persistent filesystem cache (.next/cache) grows unbounded and gzip-
+  // serializes itself on every compile, which was crashing the dev server
+  // with "Array buffer allocation failed" / OOM once the cache passed
+  // ~800MB. Disabling it in dev trades slower rebuilds for a dev server
+  // that doesn't crash; production builds are unaffected.
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.cache = false;
+    }
+    return config;
   },
 };
 

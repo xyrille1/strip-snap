@@ -169,3 +169,150 @@ an iPhone 13 viewport emulation for the mobile pass.
   production) is `position: fixed` and, on a viewport this narrow, can
   visually overlap page content — cosmetic only, not an app bug, and
   dismissable.
+
+## Pass 3 — 2026-08-10 (full end-to-end QA + Classic Sketch redesign)
+
+Driven with Playwright + Chromium (fake camera device) against a live local
+Supabase, across three flows: solo at 1440×900, solo at 390×844 (iPhone-13
+viewport), and a two-browser-context invite/multiplayer run. Every screen was
+checked for console errors, failed requests, 5xx responses, and horizontal
+overflow. Screenshots and driver scripts are in the session scratchpad.
+
+**Result: 229/229 tests, `tsc --noEmit` clean, `eslint` clean, `next build`
+succeeds, all three browser flows clean.**
+
+### 🔴 Real bugs found and fixed
+
+- [x] **The primary CTA never actually rendered as a primary CTA.** Three
+  screens passed `className="border-forest bg-forest text-cream"` to
+  `<Button variant="default">` to get the one filled CTA the design brief
+  allows per screen. That silently does nothing: **Tailwind resolves
+  conflicting utilities by stylesheet order, not by the order classes appear
+  in the attribute**, so the variant's own `bg-transparent` / `text-ink` /
+  `border-ink` win. Confirmed by reading computed styles in the browser —
+  `background-color: rgba(0, 0, 0, 0)` where forest `rgb(51, 66, 46)` was
+  intended. Affected `/style` ("Continue to generate"), `/preview`
+  ("Continue to style"), and `/generate` (both "Unlock 4" call sites).
+  Fixed by adding a real `variant="primary"` to
+  [components/ui/Button.tsx](components/ui/Button.tsx) that composes the
+  filled treatment instead of trying to override it, and switching all four
+  call sites to it. The trap is documented in `DESIGN.md` so it does not get
+  re-opened by patching colors through `className` again.
+
+- [x] **Landing-page footer rendered as a full box instead of a top rule.**
+  `border-t` (a *side* width utility) combined with `border-hairline` (an
+  *all-sides* width utility) meant the all-sides value applied to all four
+  edges. Nearly invisible at the old 1px, obvious at the sketch look's 2px.
+  Fixed with the side-specific `border-t-booth-inner`. Swept the codebase for
+  the same `border-{side}` + `border-booth*` collision — no others.
+
+- [x] **React render errors above the root layout produced a blank white
+  page, reported nowhere.** No `global-error.tsx` existed. Added
+  [app/global-error.tsx](app/global-error.tsx) — captures to Sentry and
+  renders a sketch-styled "The booth jammed" recovery screen with retry and
+  back-to-start. It renders its own `<html>`/`<body>` (Next swaps it in
+  *instead of* the root layout), so it deliberately uses literal colors
+  rather than the next/font-dependent tokens, which are unavailable when the
+  layout itself is what broke.
+
+- [x] **App Router navigations were not instrumented in Sentry.** The SDK
+  looks for an `onRouterTransitionStart` export on the client instrumentation
+  file and warned about it on every dev startup; without it, a crash on
+  `/session/:id/style` reports against whatever route the user first landed
+  on. Added to [instrumentation-client.ts](instrumentation-client.ts),
+  exported unconditionally — it is a no-op when the SDK was never initialised,
+  which is the current empty-DSN state.
+
+- [x] **`prefers-reduced-motion` did not cover the booth's 3D pose swing** —
+  a full 1s perspective rotation of the entire shell, by far the largest
+  movement on the site. `globals.css` only silenced `animate-fade-up`.
+  Suppressed via a `.booth-pose` class on
+  [components/booth3d/BoothFrame.tsx](components/booth3d/BoothFrame.tsx); the
+  class, rather than the inline `transform`, is the target because a media
+  query cannot override an inline style.
+
+- [x] **`StripPreview` could only be bounded on width.** A composited strip is
+  roughly 1:3.7, so inside a card it rendered ~1300px tall and pushed the rest
+  of the screen off the fold. Added an optional `className` on the film-black
+  frame plus `max-h` / `w-auto` on the canvas, so it scales against whichever
+  axis is tighter. Width-bound behaviour is unchanged when no caller opts in.
+
+- [x] **The landing page depended on `picsum.photos`** for its hero imagery —
+  a third-party network request on the front door, showing stock photos under
+  a caption that implied user output. Replaced with
+  [components/booth3d/SketchFilmstrip.tsx](components/booth3d/SketchFilmstrip.tsx),
+  a drawn empty filmstrip; empty frames are the honest illustration, since
+  every strip does start blank. The orphaned `images.remotePatterns` entry was
+  dropped from [next.config.mjs](next.config.mjs).
+
+- [x] **Documentation contradicted the code.** `DESIGN.md` still described the
+  old warm-editorial palette (`cream #e6e8f7`, Playfair Display, "no drop
+  shadows anywhere") as the source of truth — the opposite of what shipped.
+  Rewritten. Stale comments describing the deleted three-theme system
+  (classic / neon / kawaii) were removed from `Button`, `Card`, `Photostrip`,
+  and `tailwind.config.ts`, and the dead `card` / `card-lg` / `hairline`
+  tokens deleted now that nothing references them.
+
+### 🟡 Environment gotchas (not code bugs — recorded so the next pass does not chase them)
+
+- **Docker Desktop not running** means 67 of 229 tests fail with
+  `TypeError: fetch failed`. Nothing is verifiable until `supabase start`.
+- **The Storage container takes ~7 minutes to become healthy on a cold
+  start**, stuck in `[Migrations] Running vector_store migrations` with port
+  5000 refusing connections. Until then, 8 storage-dependent tests fail with
+  "An invalid response was received from the upstream server". **Wait it out —
+  do not restart the container**; it recovers on its own and all 8 pass.
+- **Realtime channel subscribe can report `TIMED_OUT` in the browser while the
+  dev server is cold-compiling a route** (the join push has a ~10s timeout).
+  Not an app bug: a Node probe that mints a real token via `POST /api/sessions`
+  and joins the private channel directly returns `SUBSCRIBED`, with a correct
+  `topic` claim and sane `iat`/`exp`. Once routes are warm the invite flow
+  passes cleanly. Container clocks were checked against the host and are in
+  sync.
+- **One transient `ERR_TOO_MANY_REDIRECTS` on `/session/new`** in a cold
+  browser context (Clerk dev-instance handshake). `curl` gets a plain 200 with
+  zero redirects and it cleared on retry — consistent with the known dev-key
+  artifact recorded in the 2026-08-06 pass.
+
+### ✅ Verified working this pass
+
+- [x] Solo, desktop 1440×900 — 14 screens end to end, **0** console errors,
+  **0** failed requests, **0** horizontal overflow, `participantCount = 1`.
+- [x] Solo, mobile 390×844 — same flow, same clean result, no overflow on any
+  screen.
+- [x] Invite / multiplayer, two browser contexts — presence sync (the host
+  sees the guest join live), both clients advance `/waiting` → `/capture` →
+  `/preview` together off one synced countdown, `participantCount = 2`.
+- [x] **Group collage geometry pixel-verified**, not eyeballed: the canvas is
+  408×1520 with 3 slots, and sampling the midpoint of each half-width
+  sub-region shows both halves filled with *distinct* content in every slot.
+  This is the direct regression guard for the two duplicate-participant bugs
+  in the passes above, which rendered part-black grids.
+- [x] Retake flow — the live camera now takes over the booth's centre screen
+  (`ScreenConsole`), the countdown runs, and only that frame is replaced.
+- [x] Style presets visibly change the live canvas preview (F-19).
+- [x] Print media emulation on `/output` — controls hidden, strip full-size.
+- [x] Sticker toggle on `/output`.
+- [x] Public `/strip/:id` share view loads standalone.
+- [x] `next build` succeeds; `/` still prerenders as static content despite the
+  booth shell being a client component.
+
+### Design: the booth is now the whole site
+
+Every screen except two deliberate exceptions is built on `BoothFrame` —
+landing, mode select, waiting, capture, preview, style, and the developing
+reveal. `/output` and `/strip/:id` keep the shell off on purpose so the
+finished strip gets the most whitespace on the site (design brief §3's
+"signature moment"), carrying the look through `Photostrip`'s own chrome.
+Display type moved to Architects Daughter; the 29 `font-display italic`
+usages were stripped, since that face has no italic and the browser was
+synthesizing a skewed oblique.
+
+### Not addressed
+
+- `app/fonts/GeistVF.woff` and `GeistMonoVF.woff` (~134KB) are
+  create-next-app leftovers referenced by nothing. Left in place — deleting
+  files was outside this pass's scope.
+- The 4-photo unlock still has not been exercised with a real signed-in Clerk
+  account (no test account provided); the structural path is unchanged from
+  the 2026-08-07 pass.
