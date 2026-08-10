@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripIdParamSchema } from "@/lib/validation/strip";
+import { checkRateLimit } from "@/lib/rateLimit";
+import { resolveClientIp } from "@/lib/http/clientIp";
 import { getStripById } from "@/lib/db/strips";
 import { mintSignedStripUrl } from "@/lib/storage";
 
 /** backend-schema §5: signed URLs are 5-15 min (300-900s) expiry. */
 const SIGNED_URL_EXPIRY_SECONDS = 600;
+
+// Unauthenticated and mints a fresh signed Storage URL on every call (see
+// the route doc comment below) — generous enough for legitimately re-fetching
+// a strip a few times (view, download, share, print) while still bounding
+// the unthrottled enumeration/cost vector a security audit would flag.
+const GET_STRIP_RATE_LIMIT = { limit: 60, windowSeconds: 60 * 60 };
 
 /**
  * GET /api/strips/:id — fetch a strip for share/download/print (TRD §5).
@@ -47,11 +55,21 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  void request;
-
   const parsed = stripIdParamSchema.safeParse(params);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid strip id" }, { status: 400 });
+  }
+
+  const clientIp = resolveClientIp(request);
+  const { success } = await checkRateLimit(
+    `strips:get:${clientIp}`,
+    GET_STRIP_RATE_LIMIT
+  );
+  if (!success) {
+    return NextResponse.json(
+      { error: "Too many requests recently. Please try again later." },
+      { status: 429 }
+    );
   }
 
   const strip = await getStripById(parsed.data.id);

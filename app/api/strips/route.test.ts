@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { POST } from "./route";
-import { createSession, deleteSession, updateSessionFormat } from "@/lib/db/sessions";
+import {
+  createSession,
+  deleteSession,
+  getSessionById,
+  updateSessionFormat,
+} from "@/lib/db/sessions";
 import { deleteStripImage } from "@/lib/storage";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
@@ -20,7 +25,16 @@ vi.mock("@/lib/rateLimit", () => ({
   checkRateLimit: vi.fn(),
 }));
 
+// Partial mock: every other export stays real/live — only `getSessionById`
+// is wrapped so one test can force it to reject and exercise the route's
+// catch block.
+vi.mock("@/lib/db/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/sessions")>();
+  return { ...actual, getSessionById: vi.fn(actual.getSessionById) };
+});
+
 const mockedCheckRateLimit = vi.mocked(checkRateLimit);
+const mockedGetSessionById = vi.mocked(getSessionById);
 
 function stripsRequest(
   body: unknown,
@@ -275,5 +289,24 @@ describe("POST /api/strips (integration, live local Supabase + Storage)", () => 
     expect(response.status).toBe(201);
     const body = await response.json();
     uploadedPath = `strips/${session.id}/${body.id}.png`;
+  });
+
+  it("returns 500 with the app's JSON error shape when an unexpected DB error is thrown", async () => {
+    const session = await createSession({ mode: "solo", hostUserId: null });
+    sessionId = session.id;
+    mockedGetSessionById.mockRejectedValueOnce(new Error("boom"));
+
+    const response = await POST(
+      stripsRequest({
+        sessionId: session.id,
+        stylePreset: "classic_bw",
+        format: "3",
+        imageDataUrl: ONE_PIXEL_PNG_DATA_URL,
+      })
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Failed to create strip" });
   });
 });

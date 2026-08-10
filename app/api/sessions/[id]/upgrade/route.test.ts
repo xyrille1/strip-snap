@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { POST } from "./route";
 import { createSession, deleteSession, getSessionById } from "@/lib/db/sessions";
 import { addParticipant } from "@/lib/db/participants";
@@ -13,7 +14,28 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(),
 }));
 
+// checkRateLimit fails open when Upstash isn't configured (always true) —
+// mocking it directly is the only way to exercise the 429 path without a
+// live Redis instance. Mirrors app/api/sessions/route.test.ts's pattern.
+vi.mock("@/lib/rateLimit", () => ({
+  checkRateLimit: vi.fn(),
+}));
+
+// Partial mock: every other export stays real/live — only `getSessionById`
+// is wrapped so one test can force it to reject and exercise the route's
+// catch block.
+vi.mock("@/lib/db/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/sessions")>();
+  return { ...actual, getSessionById: vi.fn(actual.getSessionById) };
+});
+
 const mockedAuth = vi.mocked(auth);
+const mockedCheckRateLimit = vi.mocked(checkRateLimit);
+const mockedGetSessionById = vi.mocked(getSessionById);
+
+beforeEach(() => {
+  mockedCheckRateLimit.mockResolvedValue({ success: true });
+});
 
 function upgradeRequest(sessionId: string): NextRequest {
   return new NextRequest(
@@ -28,6 +50,7 @@ describe("POST /api/sessions/:id/upgrade (integration, live local Supabase, Cler
 
   afterEach(async () => {
     mockedAuth.mockReset();
+    mockedCheckRateLimit.mockReset();
 
     if (sessionId) {
       await deleteSession(sessionId);
@@ -111,5 +134,44 @@ describe("POST /api/sessions/:id/upgrade (integration, live local Supabase, Cler
 
     const persisted = await getSessionById(created.id);
     expect(persisted?.format).toBe("4");
+  });
+
+  it("returns 429 when the rate limiter denies the request", async () => {
+    const clerkId = `clerk_test_${crypto.randomUUID()}`;
+    mockedAuth.mockResolvedValue({ userId: clerkId } as Awaited<
+      ReturnType<typeof auth>
+    >);
+    mockedCheckRateLimit.mockResolvedValue({ success: false });
+
+    const created = await createSession({ mode: "invite", hostUserId: null });
+    sessionId = created.id;
+
+    const response = await POST(upgradeRequest(created.id), {
+      params: { id: created.id },
+    });
+
+    expect(response.status).toBe(429);
+
+    const persisted = await getSessionById(created.id);
+    expect(persisted?.format).toBe("3");
+  });
+
+  it("returns 500 with the app's JSON error shape when an unexpected DB error is thrown", async () => {
+    const clerkId = `clerk_test_${crypto.randomUUID()}`;
+    mockedAuth.mockResolvedValue({ userId: clerkId } as Awaited<
+      ReturnType<typeof auth>
+    >);
+
+    const created = await createSession({ mode: "invite", hostUserId: null });
+    sessionId = created.id;
+    mockedGetSessionById.mockRejectedValueOnce(new Error("boom"));
+
+    const response = await POST(upgradeRequest(created.id), {
+      params: { id: created.id },
+    });
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Failed to upgrade session format" });
   });
 });
