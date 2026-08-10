@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/vercel.json",
   "crons": [
     {
       "path": "/api/cron/daily-metrics",
