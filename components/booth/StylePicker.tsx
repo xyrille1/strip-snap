@@ -50,7 +50,7 @@ export default function StylePicker({ selected, onSelect }: StylePickerProps) {
             aria-checked={isSelected}
             onClick={() => onSelect(preset)}
             className={[
-              "flex flex-col items-center gap-2 rounded-card border p-3 text-center transition-colors",
+              "flex flex-col items-center gap-2 rounded-booth border-booth-inner p-3 text-center transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-cream focus-visible:ring-ink",
               isSelected
                 ? "border-forest bg-forest/10"
@@ -59,7 +59,7 @@ export default function StylePicker({ selected, onSelect }: StylePickerProps) {
           >
             <span
               aria-hidden="true"
-              className="h-12 w-12 rounded-card bg-film-black"
+              className="h-12 w-12 rounded-booth border-booth-inner border-structural-gray bg-film-black"
               style={{ filter: SWATCH_FILTER[preset], backgroundColor: "#8C3A1D" }}
             />
             <span className="font-sans text-xs font-medium text-ink">

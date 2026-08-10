@@ -15,7 +15,7 @@ export interface PhotostripProps {
  * Floating, slightly-tilted photostrip frame (docs/goal-ui.md's Photostrip /
  * the "result" reveal) — wraps the app's own single composited strip image
  * (from lib/compositor.ts, already laid out with sprocket holes/frame) in a
- * mat + themed border + shadow, with a click-to-flip tilt like the
+ * mat + booth border + shadow, with a click-to-flip tilt like the
  * reference. The reference composites 4 raw shots client-side into this
  * component; this app already has one finished image by the time it reaches
  * output/share, so this just frames it rather than re-compositing.
