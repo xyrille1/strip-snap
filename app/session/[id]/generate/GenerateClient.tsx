@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import SessionExpired from "@/components/booth/SessionExpired";
+import BoothFrame from "@/components/booth3d/BoothFrame";
 import { STYLE_PRESETS } from "@/lib/validation/strip";
 import type { StripFormat, StylePreset } from "@/lib/compositor";
 import { compositeStripToDataUrl } from "@/lib/compositeStrip";
@@ -15,6 +16,13 @@ import { loadSelectedStyle } from "@/lib/styleStorage";
 import { loadStoredParticipant, saveStoredParticipant } from "@/lib/participantStorage";
 import { saveGeneratedStripId } from "@/lib/stripStorage";
 import { fetchSessionSummary } from "@/lib/booth/sessionSummary";
+
+// Left-panel plates for the booth shell during the developing reveal.
+const DEVELOPING_INSTRUCTIONS = [
+  { title: "Exposing", description: "Your shots are being laid onto the strip." },
+  { title: "Developing", description: "The image fades up as it comes into focus." },
+  { title: "Delivering", description: "It drops into the chute when it's ready." },
+];
 
 export interface GenerateClientProps {
   sessionId: string;
@@ -335,8 +343,8 @@ export default function GenerateClient({ sessionId }: GenerateClientProps) {
     return (
       <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-8 px-4 py-16 text-center">
         <div>
-          <p className="font-display text-sm italic text-rust-body">Format</p>
-          <h1 className="mt-2 font-display text-4xl italic text-ink">3 photos, or unlock 4?</h1>
+          <p className="font-display text-sm text-rust-body">Format</p>
+          <h1 className="mt-2 font-display text-4xl text-ink">3 photos, or unlock 4?</h1>
           <p className="mt-3 font-sans text-sm text-ink-secondary">
             Signing in unlocks the 4-photo strip for everyone in this session — no extra cost,
             just an account.
@@ -366,8 +374,7 @@ export default function GenerateClient({ sessionId }: GenerateClientProps) {
               </p>
             ) : isSignedIn ? (
               <Button
-                variant="default"
-                className="border-forest bg-forest text-cream hover:bg-forest/90"
+                variant="primary"
                 onClick={handleRequestUnlock}
                 disabled={upgrading}
               >
@@ -376,8 +383,7 @@ export default function GenerateClient({ sessionId }: GenerateClientProps) {
             ) : (
               <SignInButton mode="modal">
                 <Button
-                  variant="default"
-                  className="border-forest bg-forest text-cream hover:bg-forest/90"
+                  variant="primary"
                   onClick={handleRequestUnlock}
                   disabled={upgrading}
                 >
@@ -392,38 +398,50 @@ export default function GenerateClient({ sessionId }: GenerateClientProps) {
   }
 
   // phase === "developing" | "uploading" | "done"
+  // The booth's payoff moment — the strip is literally being delivered, so it
+  // plays out inside the booth shell (right panel = the delivery chute) rather
+  // than on a bare page.
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-xl flex-col items-center justify-center gap-6 px-4 py-16 text-center">
-      <p className="font-display text-sm italic text-rust-body">Developing</p>
-      <div
-        className="w-full overflow-hidden rounded-card-lg border border-hairline border-structural-gray bg-film-black p-2"
-        aria-live="polite"
+    <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-12">
+      <BoothFrame
+        pose="result"
+        leftInstructions={DEVELOPING_INSTRUCTIONS.map((item) => item.title)}
+        rightLabel="DELIVERY"
+        rightSublabel="Photos drop here"
       >
-        {developedDataUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- data URL, not an optimizable remote asset.
-          <img
-            src={developedDataUrl}
-            alt="Your photo strip, developing"
-            className="mx-auto block h-auto max-w-full transition-all ease-out"
-            style={{
-              transitionDuration: `${REVEAL_TRANSITION_MS}ms`,
-              opacity: revealed ? 1 : 0.35,
-              filter: revealed ? "none" : "grayscale(100%) blur(1px)",
-            }}
-          />
-        ) : (
-          <div className="flex h-64 items-center justify-center">
-            <span className="font-sans text-sm text-cream/70">Preparing your shots…</span>
+        <Card className="flex w-[min(92vw,420px)] flex-col items-center gap-6 p-6 sm:p-8 text-center">
+          <p className="font-display text-sm text-rust-body">Developing</p>
+
+          <div
+            className="flex h-[360px] w-full items-center justify-center overflow-hidden rounded-booth border-booth border-structural-gray bg-film-black p-2"
+            aria-live="polite"
+          >
+            {developedDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- data URL, not an optimizable remote asset.
+              <img
+                src={developedDataUrl}
+                alt="Your photo strip, developing"
+                className="mx-auto block h-auto max-h-full w-auto max-w-full transition-all ease-out"
+                style={{
+                  transitionDuration: `${REVEAL_TRANSITION_MS}ms`,
+                  opacity: revealed ? 1 : 0.35,
+                  filter: revealed ? "none" : "grayscale(100%) blur(1px)",
+                }}
+              />
+            ) : (
+              <span className="font-sans text-sm text-cream/70">Preparing your shots…</span>
+            )}
           </div>
-        )}
-      </div>
-      <p className="font-display text-2xl italic text-ink" role="status" aria-live="polite">
-        {phase === "uploading"
-          ? "Almost ready…"
-          : secondsLeft > 0
-            ? `Photos delivered here in ${secondsLeft}…`
-            : "Developing…"}
-      </p>
+
+          <p className="font-display text-2xl text-ink" role="status" aria-live="polite">
+            {phase === "uploading"
+              ? "Almost ready…"
+              : secondsLeft > 0
+                ? `Photos delivered here in ${secondsLeft}…`
+                : "Developing…"}
+          </p>
+        </Card>
+      </BoothFrame>
     </main>
   );
 }

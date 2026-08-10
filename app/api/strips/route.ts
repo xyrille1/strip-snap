@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { createStripSchema } from "@/lib/validation/strip";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { resolveClientIp } from "@/lib/http/clientIp";
@@ -101,63 +102,71 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const session = await getSessionById(parsed.data.sessionId);
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
+  try {
+    const session = await getSessionById(parsed.data.sessionId);
+    if (!session) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
 
-  // Format-smuggling guard: the compositor is entirely client-side, so the
-  // server never sees individual photo counts — it can only check the
-  // claimed `format` against the session's actual, server-controlled
-  // `format` column. This stops a client from labeling/claiming a 4-photo
-  // strip for a session that was never upgraded via the authenticated
-  // /upgrade route (Phase 1).
-  if (parsed.data.format !== session.format) {
+    // Format-smuggling guard: the compositor is entirely client-side, so the
+    // server never sees individual photo counts — it can only check the
+    // claimed `format` against the session's actual, server-controlled
+    // `format` column. This stops a client from labeling/claiming a 4-photo
+    // strip for a session that was never upgraded via the authenticated
+    // /upgrade route (Phase 1).
+    if (parsed.data.format !== session.format) {
+      return NextResponse.json(
+        {
+          error: `Submitted format '${parsed.data.format}' does not match this session's format '${session.format}'`,
+        },
+        { status: 403 }
+      );
+    }
+
+    const stripId = crypto.randomUUID();
+    const { bytes, extension } = decodeImageDataUrl(parsed.data.imageDataUrl);
+    const storagePath = `strips/${session.id}/${stripId}.${extension}`;
+
+    await uploadStripImage(storagePath, bytes);
+
+    const strip = await createStrip({
+      id: stripId,
+      sessionId: session.id,
+      stylePreset: parsed.data.stylePreset,
+      storagePath,
+    });
+
+    const signedUrl = await mintSignedStripUrl(
+      strip.storage_path,
+      SIGNED_URL_EXPIRY_SECONDS
+    );
+
+    // TRD item 9a / implementation-plan Phase 11: this route deliberately has
+    // no Clerk auth requirement (see the route-level comment above), so there
+    // is no authenticated identity to resolve here -- `userId` is always null.
+    // trackEvent never rejects (see lib/analytics.ts), so this can't turn a
+    // successful strip upload into a 500.
+    await trackEvent({
+      sessionId: strip.session_id,
+      event: "strip_completed",
+      userId: null,
+    });
+
     return NextResponse.json(
       {
-        error: `Submitted format '${parsed.data.format}' does not match this session's format '${session.format}'`,
+        id: strip.id,
+        sessionId: strip.session_id,
+        stylePreset: strip.style_preset,
+        signedUrl,
+        createdAt: strip.created_at,
       },
-      { status: 403 }
+      { status: 201 }
+    );
+  } catch (error) {
+    Sentry.captureException(error, { tags: { area: "api", route: "strips:create" } });
+    return NextResponse.json(
+      { error: "Failed to create strip" },
+      { status: 500 }
     );
   }
-
-  const stripId = crypto.randomUUID();
-  const { bytes, extension } = decodeImageDataUrl(parsed.data.imageDataUrl);
-  const storagePath = `strips/${session.id}/${stripId}.${extension}`;
-
-  await uploadStripImage(storagePath, bytes);
-
-  const strip = await createStrip({
-    id: stripId,
-    sessionId: session.id,
-    stylePreset: parsed.data.stylePreset,
-    storagePath,
-  });
-
-  const signedUrl = await mintSignedStripUrl(
-    strip.storage_path,
-    SIGNED_URL_EXPIRY_SECONDS
-  );
-
-  // TRD item 9a / implementation-plan Phase 11: this route deliberately has
-  // no Clerk auth requirement (see the route-level comment above), so there
-  // is no authenticated identity to resolve here -- `userId` is always null.
-  // trackEvent never rejects (see lib/analytics.ts), so this can't turn a
-  // successful strip upload into a 500.
-  await trackEvent({
-    sessionId: strip.session_id,
-    event: "strip_completed",
-    userId: null,
-  });
-
-  return NextResponse.json(
-    {
-      id: strip.id,
-      sessionId: strip.session_id,
-      stylePreset: strip.style_preset,
-      signedUrl,
-      createdAt: strip.created_at,
-    },
-    { status: 201 }
-  );
 }

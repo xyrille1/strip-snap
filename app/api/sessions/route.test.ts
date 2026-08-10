@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { POST } from "./route";
-import { deleteSession } from "@/lib/db/sessions";
+import { createSession, deleteSession } from "@/lib/db/sessions";
 import { getParticipantsForSession } from "@/lib/db/participants";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
@@ -21,8 +21,18 @@ vi.mock("@/lib/rateLimit", () => ({
   checkRateLimit: vi.fn(),
 }));
 
+// Partial mock: every other export stays the real, live-Supabase-backed
+// implementation (other tests in this file rely on that) — only
+// `createSession` is wrapped so a single test can force it to reject and
+// exercise the route's catch block, without disturbing the rest.
+vi.mock("@/lib/db/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/sessions")>();
+  return { ...actual, createSession: vi.fn(actual.createSession) };
+});
+
 const mockedAuth = vi.mocked(auth);
 const mockedCheckRateLimit = vi.mocked(checkRateLimit);
+const mockedCreateSession = vi.mocked(createSession);
 
 function sessionsRequest(
   body: unknown,
@@ -172,5 +182,15 @@ describe("POST /api/sessions (integration, live local Supabase, Clerk auth() + r
     if (eventsError) throw new Error(eventsError.message);
     expect(events).toHaveLength(1);
     expect(events![0].user_id).toBe(session?.host_user_id);
+  });
+
+  it("returns 500 with the app's JSON error shape when an unexpected DB error is thrown", async () => {
+    mockedCreateSession.mockRejectedValueOnce(new Error("boom"));
+
+    const response = await POST(sessionsRequest({ mode: "solo" }));
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Failed to create session" });
   });
 });

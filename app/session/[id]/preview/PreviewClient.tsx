@@ -7,12 +7,32 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import CameraView, { type CameraPermissionState } from "@/components/booth/CameraView";
 import Countdown from "@/components/booth/Countdown";
+import NumberedList from "@/components/ui/NumberedList";
+import BoothFrame from "@/components/booth3d/BoothFrame";
+import ScreenConsole from "@/components/booth3d/ScreenConsole";
 import { MAX_PHOTOS } from "@/lib/captureBurst";
 import { CAPTURE_JPEG_QUALITY, computeCaptureDimensions } from "@/lib/captureResolution";
 import { loadStoredParticipant, type StoredParticipant } from "@/lib/participantStorage";
 import { loadStoredShots, replaceShotAt, saveStoredShots } from "@/lib/shotStorage";
 import { loadSessionShots, updateParticipantShots } from "@/lib/sessionShotsStorage";
 import { broadcastShot, setRealtimeAuth } from "@/lib/realtime";
+
+// Left-panel plates on the booth shell, plus the full-detail fallback list
+// below `lg:` where those panels collapse out of view.
+const PREVIEW_INSTRUCTIONS = [
+  {
+    title: "Check each frame",
+    description: "Every shot you just took, in the order it lands on the strip.",
+  },
+  {
+    title: "Retake any one",
+    description: "A short countdown replaces just that frame — the rest stay put.",
+  },
+  {
+    title: "Continue",
+    description: "Move on to pick the look for the whole strip.",
+  },
+];
 
 export interface PreviewClientProps {
   sessionId: string;
@@ -248,75 +268,96 @@ export default function PreviewClient({ sessionId }: PreviewClientProps) {
   }
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-3xl flex-col items-center gap-8 px-4 py-16">
-      <div className="animate-fade-up text-center">
-        <p className="font-display text-sm italic text-rust-body">Preview</p>
-        <h1 className="mt-2 font-display text-4xl italic text-ink">Review your shots</h1>
-        <p className="mt-2 font-sans text-sm text-ink-secondary">
-          Not happy with one? Retake it — the rest stay exactly as they are.
-        </p>
-      </div>
-
-      {retaking ? (
-        <Card className="w-full max-w-sm overflow-hidden p-4">
-          <p className="mb-3 text-center font-sans text-sm font-semibold text-ink">
-            Retaking shot {String(retake.shotIndex + 1).padStart(2, "0")}
-          </p>
-          <div className="overflow-hidden rounded-card border border-hairline border-structural-gray">
+    <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-12">
+      <BoothFrame
+        pose="result"
+        leftInstructions={PREVIEW_INSTRUCTIONS.map((item) => item.title)}
+        rightLabel="REVIEW"
+        rightSublabel="Retake before you commit"
+      >
+        {/* The booth's centre slot is a single screen, so a retake takes it
+            over entirely — the live camera goes where the camera always goes
+            (ScreenConsole, same as CaptureClient) rather than appearing as a
+            second card floating beside the grid. */}
+        {retaking ? (
+          <ScreenConsole
+            status={retake.countdownTarget !== null ? "countdown" : "active"}
+            controlDeck={
+              <div className="flex flex-col items-center gap-3">
+                <p className="font-sans text-sm font-semibold text-ink">
+                  Retaking shot {String(retake.shotIndex + 1).padStart(2, "0")}
+                </p>
+                <Countdown targetTimestamp={retake.countdownTarget} />
+                <Button variant="default" onClick={cancelRetake}>
+                  Cancel
+                </Button>
+              </div>
+            }
+          >
             <CameraView ref={videoRef} active onPermissionChange={handleRetakeCameraChange} />
-          </div>
-          <div className="mt-4 flex flex-col items-center gap-3">
-            <Countdown targetTimestamp={retake.countdownTarget} />
-            <Button variant="default" onClick={cancelRetake}>
-              Cancel
-            </Button>
-          </div>
-        </Card>
-      ) : null}
+          </ScreenConsole>
+        ) : (
+          <Card className="flex w-[min(92vw,420px)] flex-col gap-6 p-6 sm:p-8">
+            <div className="animate-fade-up text-center">
+              <p className="font-display text-sm text-rust-body">Preview</p>
+              <h1 className="mt-2 font-display text-3xl text-ink">Review your shots</h1>
+              <p className="mt-2 font-sans text-sm text-ink-secondary">
+                Not happy with one? Retake it — the rest stay exactly as they are.
+              </p>
+            </div>
 
-      <div className="grid w-full grid-cols-2 gap-4 sm:grid-cols-2">
-        {shots.map((shot, index) => (
-          <Card key={index} className="flex flex-col gap-3 p-3">
-            <div className="flex items-center justify-between">
-              <span className="font-display text-sm italic text-rust-body tabular-nums">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              {shot === null ? <Badge variant="warning">Missing</Badge> : null}
-            </div>
-            <div className="aspect-[3/4] w-full overflow-hidden rounded-card bg-structural-gray/40">
-              {shot ? (
-                // eslint-disable-next-line @next/next/no-img-element -- client-side-only data URL, never a remote/optimizable src.
-                <img
-                  src={shot}
-                  alt={`Shot ${index + 1} of ${MAX_PHOTOS}`}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <span className="font-sans text-xs text-ink-secondary">Not captured</span>
+            <div className="grid grid-cols-2 gap-4">
+              {shots.map((shot, index) => (
+                <div key={index} className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-display text-sm text-rust-body tabular-nums">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    {shot === null ? <Badge variant="warning">Missing</Badge> : null}
+                  </div>
+                  <div className="aspect-[3/4] w-full overflow-hidden rounded-booth border-booth-inner border-structural-gray bg-screen">
+                    {shot ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- client-side-only data URL, never a remote/optimizable src.
+                      <img
+                        src={shot}
+                        alt={`Shot ${index + 1} of ${MAX_PHOTOS}`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center">
+                        <span className="font-sans text-xs text-cream/70">Not captured</span>
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    variant="default"
+                    disabled={retaking}
+                    onClick={() => startRetake(index)}
+                    className="w-full px-2 text-xs"
+                  >
+                    Retake
+                  </Button>
                 </div>
-              )}
+              ))}
             </div>
+
             <Button
-              variant="default"
+              variant="primary"
               disabled={retaking}
-              onClick={() => startRetake(index)}
+              onClick={goToStyle}
               className="w-full"
             >
-              Retake
+              Continue to style →
             </Button>
           </Card>
-        ))}
-      </div>
+        )}
+      </BoothFrame>
 
-      <Button
-        variant="default"
-        disabled={retaking}
-        onClick={goToStyle}
-        className="border-forest bg-forest text-cream hover:bg-forest/90"
-      >
-        Continue to style →
-      </Button>
+      <div className="w-full max-w-2xl lg:hidden">
+        <Card className="p-6 sm:p-8">
+          <NumberedList items={PREVIEW_INSTRUCTIONS} layout="columns" />
+        </Card>
+      </div>
     </main>
   );
 }

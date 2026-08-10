@@ -20,7 +20,7 @@ const TICK_MS = 100;
  * lib/countdownSync.ts's own `setTimeout`, per TRD §3); it just re-renders
  * on an interval to show the remaining seconds ticking down.
  *
- * Serif italic numeral, ink/ink-secondary tones only — design brief's
+ * Hand-drawn numeral, ink/ink-secondary tones only — design brief's
  * "quiet, patient tone... no urgency-red styling" for the countdown moment.
  */
 export default function Countdown({ targetTimestamp }: CountdownProps) {
@@ -48,7 +48,7 @@ export default function Countdown({ targetTimestamp }: CountdownProps) {
       aria-live="polite"
       aria-label="Countdown to capture"
     >
-      <span className="font-display text-7xl italic text-ink tabular-nums">
+      <span className="font-display text-7xl text-ink tabular-nums">
         {secondsRemaining > 0 ? secondsRemaining : "•"}
       </span>
       <span className="font-sans text-sm text-ink-secondary">

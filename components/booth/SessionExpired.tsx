@@ -21,8 +21,8 @@ export default function SessionExpired({ sessionId }: SessionExpiredProps) {
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-xl flex-col items-center justify-center gap-6 px-4 py-16 text-center">
       <div>
-        <p className="font-display text-sm italic text-rust-body">Session ended</p>
-        <h1 className="mt-2 font-display text-4xl italic text-ink">
+        <p className="font-display text-sm text-rust-body">Session ended</p>
+        <h1 className="mt-2 font-display text-4xl text-ink">
           This booth session has closed
         </h1>
       </div>

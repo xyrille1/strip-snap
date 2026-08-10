@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { sessionIdParamSchema } from "@/lib/validation/session";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { getOrCreateByClerkId } from "@/lib/db/appUsers";
 import { getParticipantByUserAndSession } from "@/lib/db/participants";
 import { getSessionById, updateSessionFormat } from "@/lib/db/sessions";
+
+// Rare, once-per-session action for a real signed-in user — generous
+// relative to the anonymous-route limits (sessions/route.ts's 10/hour,
+// join's 30/hour) since it's keyed per-user, not per-IP, and there's no
+// NAT-sharing concern to size around.
+const UPGRADE_SESSION_RATE_LIMIT = { limit: 10, windowSeconds: 60 * 60 };
 
 /**
  * POST /api/sessions/:id/upgrade — a logged-in participant upgrades the
@@ -42,25 +50,44 @@ export async function POST(
     );
   }
 
-  const existing = await getSessionById(parsed.data.id);
-  if (!existing) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  const appUser = await getOrCreateByClerkId(userId);
-
-  const participant = await getParticipantByUserAndSession(
-    parsed.data.id,
-    appUser.id
+  const { success } = await checkRateLimit(
+    `sessions:upgrade:${userId}`,
+    UPGRADE_SESSION_RATE_LIMIT
   );
-  if (!participant) {
+  if (!success) {
     return NextResponse.json(
-      { error: "You must be a participant of this session to upgrade it" },
-      { status: 403 }
+      { error: "Too many upgrade attempts recently. Please try again later." },
+      { status: 429 }
     );
   }
 
-  const session = await updateSessionFormat(parsed.data.id, "4");
+  try {
+    const existing = await getSessionById(parsed.data.id);
+    if (!existing) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
 
-  return NextResponse.json(session, { status: 200 });
+    const appUser = await getOrCreateByClerkId(userId);
+
+    const participant = await getParticipantByUserAndSession(
+      parsed.data.id,
+      appUser.id
+    );
+    if (!participant) {
+      return NextResponse.json(
+        { error: "You must be a participant of this session to upgrade it" },
+        { status: 403 }
+      );
+    }
+
+    const session = await updateSessionFormat(parsed.data.id, "4");
+
+    return NextResponse.json(session, { status: 200 });
+  } catch (error) {
+    Sentry.captureException(error, { tags: { area: "api", route: "sessions:upgrade" } });
+    return NextResponse.json(
+      { error: "Failed to upgrade session format" },
+      { status: 500 }
+    );
+  }
 }

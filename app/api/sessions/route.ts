@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { createSessionSchema } from "@/lib/validation/session";
 import { checkRateLimit } from "@/lib/rateLimit";
@@ -49,61 +50,75 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Optional: if the creator happens to already have a Clerk session, record
-  // them as the host (backend-schema §3.2 `host_user_id`). Session creation
-  // itself never requires login (PRD functional requirement 1/5).
-  const { userId: clerkId } = await auth();
-  let hostUserId: string | null = null;
-  if (clerkId) {
-    const appUser = await getOrCreateByClerkId(clerkId);
-    hostUserId = appUser.id;
+  try {
+    // Optional: if the creator happens to already have a Clerk session, record
+    // them as the host (backend-schema §3.2 `host_user_id`). Session creation
+    // itself never requires login (PRD functional requirement 1/5).
+    const { userId: clerkId } = await auth();
+    let hostUserId: string | null = null;
+    if (clerkId) {
+      const appUser = await getOrCreateByClerkId(clerkId);
+      hostUserId = appUser.id;
+    }
+
+    const session = await createSession({ mode: parsed.data.mode, hostUserId });
+
+    // addParticipant and trackEvent both only need `session.id` (+ hostUserId
+    // for trackEvent) — neither depends on the other's result, so they run
+    // concurrently instead of stacking two sequential network round trips
+    // on the critical "create session -> land on /capture or /waiting" path.
+    // trackEvent never rejects (see lib/analytics.ts), so Promise.all here
+    // can only reject via addParticipant, same as if it were awaited alone.
+    const [hostParticipant] = await Promise.all([
+      addParticipant({
+        sessionId: session.id,
+        userId: hostUserId,
+        displayName: DEFAULT_HOST_DISPLAY_NAME,
+      }),
+      // TRD item 9a / implementation-plan Phase 11: fire-and-record once the
+      // session exists. Reuses the same `hostUserId` resolution above — null
+      // for an anonymous creator, the resolved app_users.id for a logged-in
+      // one — rather than re-deriving it.
+      trackEvent({
+        sessionId: session.id,
+        event: "session_started",
+        userId: hostUserId,
+      }),
+    ]);
+
+    // Minted here (not deferred to /join) so solo mode's client can store this
+    // identity directly and never call /join at all — see ModeSelectClient's
+    // doc comment. Without this, solo's own /capture identity-resolution
+    // effect had no stored participant to find and fell back to POSTing
+    // /join itself, producing a second, disconnected participant row for the
+    // same physical person (QA finding, 2026-08-06: "solo strips render as a
+    // mostly-empty grid"). Depends on hostParticipant.id, so it stays after
+    // the Promise.all above rather than joining it.
+    const hostRealtimeToken = await mintRealtimeToken(session.id, hostParticipant.id);
+
+    return NextResponse.json(
+      {
+        id: session.id,
+        // Relative on purpose — the TRD §5 contract only requires the
+        // join/waiting entry point, not a fully-qualified URL. Solo mode's
+        // own client ignores this and navigates straight to /capture
+        // instead (flows.md §1a).
+        join_url: `/session/${session.id}/waiting`,
+        // Solo mode's ModeSelectClient stores this as its identity before
+        // navigating to /capture, same shape as /join's response, so it never
+        // needs to call /join itself. Invite mode's client currently ignores
+        // this field — every invite participant (including the host) still
+        // names themselves and joins explicitly from the waiting room.
+        participant: { id: hostParticipant.id, display_name: hostParticipant.display_name },
+        realtimeToken: hostRealtimeToken,
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    Sentry.captureException(error, { tags: { area: "api", route: "sessions:create" } });
+    return NextResponse.json(
+      { error: "Failed to create session" },
+      { status: 500 }
+    );
   }
-
-  const session = await createSession({ mode: parsed.data.mode, hostUserId });
-
-  const hostParticipant = await addParticipant({
-    sessionId: session.id,
-    userId: hostUserId,
-    displayName: DEFAULT_HOST_DISPLAY_NAME,
-  });
-
-  // Minted here (not deferred to /join) so solo mode's client can store this
-  // identity directly and never call /join at all — see ModeSelectClient's
-  // doc comment. Without this, solo's own /capture identity-resolution
-  // effect had no stored participant to find and fell back to POSTing
-  // /join itself, producing a second, disconnected participant row for the
-  // same physical person (QA finding, 2026-08-06: "solo strips render as a
-  // mostly-empty grid").
-  const hostRealtimeToken = await mintRealtimeToken(session.id, hostParticipant.id);
-
-  // TRD item 9a / implementation-plan Phase 11: fire-and-record only after
-  // the session (and its host participant row) actually exist. Reuses the
-  // same `hostUserId` resolution above -- null for an anonymous creator, the
-  // resolved app_users.id for a logged-in one -- rather than re-deriving it.
-  // trackEvent never rejects (see lib/analytics.ts), so this can't turn a
-  // successful session creation into a 500.
-  await trackEvent({
-    sessionId: session.id,
-    event: "session_started",
-    userId: hostUserId,
-  });
-
-  return NextResponse.json(
-    {
-      id: session.id,
-      // Relative on purpose — no NEXT_PUBLIC_SITE_URL exists yet in this repo,
-      // and the TRD §5 contract only requires the join/waiting entry point, not
-      // a fully-qualified URL. Solo mode's own client ignores this and
-      // navigates straight to /capture instead (flows.md §1a).
-      join_url: `/session/${session.id}/waiting`,
-      // Solo mode's ModeSelectClient stores this as its identity before
-      // navigating to /capture, same shape as /join's response, so it never
-      // needs to call /join itself. Invite mode's client currently ignores
-      // this field — every invite participant (including the host) still
-      // names themselves and joins explicitly from the waiting room.
-      participant: { id: hostParticipant.id, display_name: hostParticipant.display_name },
-      realtimeToken: hostRealtimeToken,
-    },
-    { status: 201 }
-  );
 }

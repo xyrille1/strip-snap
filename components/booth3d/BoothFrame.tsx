@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useBoothTheme } from "./BoothThemeProvider";
 import { BoothPanelLeft, BoothPanelRight } from "./BoothPanels";
 
 export type BoothPose = "setup" | "active" | "result";
@@ -36,36 +35,23 @@ export default function BoothFrame({
   rightSublabel,
   children,
 }: BoothFrameProps) {
-  const { themeId } = useBoothTheme();
-
   return (
     <div
       className="relative w-full flex justify-center items-center py-10"
       style={{ perspective: "1400px" }}
     >
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        {themeId === "classic" ? (
-          <div
-            className="absolute inset-0 opacity-[0.05]"
-            style={{
-              backgroundImage: "radial-gradient(circle at center, #000 2px, transparent 2px)",
-              backgroundSize: "24px 24px",
-            }}
-          />
-        ) : null}
-        {themeId === "neon" ? (
-          <>
-            <div className="absolute bottom-0 w-full h-1/2 bg-gradient-to-t from-pink-900/20 to-transparent" />
-            <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-cyan-900/20 to-transparent" />
-          </>
-        ) : null}
-        {themeId === "kawaii" ? (
-          <div className="absolute w-[500px] h-[500px] bg-white/40 rounded-full blur-3xl opacity-60 -top-32 -left-32" />
-        ) : null}
+        <div
+          className="absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage: "radial-gradient(circle at center, #000 2px, transparent 2px)",
+            backgroundSize: "24px 24px",
+          }}
+        />
       </div>
 
       <div
-        className="relative flex items-center gap-1 transition-transform duration-1000 ease-[cubic-bezier(0.23,1,0.32,1)]"
+        className="booth-pose relative flex items-center gap-1 transition-transform duration-1000 ease-[cubic-bezier(0.23,1,0.32,1)]"
         style={{ transformStyle: "preserve-3d", transform: POSE_TRANSFORM[pose] }}
       >
         <div style={{ transform: "rotateY(20deg)", transformOrigin: "right center" }}>
