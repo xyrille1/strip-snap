@@ -7,7 +7,6 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import NumberedList from "@/components/ui/NumberedList";
 import BoothFrame from "@/components/booth3d/BoothFrame";
-import ThemeSelector from "@/components/booth3d/ThemeSelector";
 import { UserIcon, UsersIcon } from "@/components/booth3d/icons";
 import { saveStoredParticipant } from "@/lib/participantStorage";
 
@@ -100,8 +99,6 @@ export default function ModeSelectClient() {
 
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-12">
-      <ThemeSelector />
-
       <BoothFrame
         pose="setup"
         leftInstructions={INSTRUCTIONS.map((item) => item.title)}
@@ -110,8 +107,8 @@ export default function ModeSelectClient() {
       >
         <Card className="flex w-[min(92vw,420px)] flex-col items-center gap-8 p-6 sm:p-8">
           <div className="animate-fade-up text-center">
-            <p className="font-display text-sm italic text-rust-body">Step one</p>
-            <h1 className="mt-2 font-display text-3xl italic text-ink">
+            <p className="font-display text-sm text-rust-body">Step one</p>
+            <h1 className="mt-2 font-display text-3xl text-ink">
               Choose how you&apos;re shooting
             </h1>
           </div>

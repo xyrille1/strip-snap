@@ -366,7 +366,16 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
       });
     }
 
-    void connect();
+    // Realtime channel subscribes can transiently fail (e.g. TIMED_OUT while
+    // a dev server is still cold-compiling this route, or on a flaky
+    // connection — see QA-FINDINGS.md) — caught and logged rather than left
+    // to surface as an unhandled promise rejection.
+    void connect().catch((err) => {
+      console.error(
+        `[CaptureClient] failed to establish presence for session ${sessionId}`,
+        err
+      );
+    });
     return () => {
       cancelled = true;
     };
@@ -385,6 +394,11 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
       participantId: participant.participantId,
       displayName: participant.displayName,
       status: "ready",
+    }).catch((err) => {
+      console.error(
+        `[CaptureClient] failed to update presence to "ready" for session ${sessionId}`,
+        err
+      );
     });
   }, [sessionId, state, cameraState]);
 
@@ -405,6 +419,11 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
       participantId: participant.participantId,
       displayName: participant.displayName,
       status: "dropped",
+    }).catch((err) => {
+      console.error(
+        `[CaptureClient] failed to update presence to "dropped" for session ${sessionId}`,
+        err
+      );
     });
   }, [sessionId, state, cameraState]);
 
@@ -602,8 +621,8 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-8 sm:py-12">
       <div className="animate-fade-up text-center">
-        <p className="font-display text-sm italic text-rust-body">Capture</p>
-        <h1 className="mt-2 font-display text-3xl italic text-ink sm:text-4xl">
+        <p className="font-display text-sm text-rust-body">Capture</p>
+        <h1 className="mt-2 font-display text-3xl text-ink sm:text-4xl">
           {blocked ? "Camera needed to continue" : "Hold still — the strip is coming"}
         </h1>
       </div>

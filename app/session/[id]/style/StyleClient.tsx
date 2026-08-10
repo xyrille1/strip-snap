@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import NumberedList from "@/components/ui/NumberedList";
 import StylePicker from "@/components/booth/StylePicker";
 import StripPreview from "@/components/booth/StripPreview";
 import SessionExpired from "@/components/booth/SessionExpired";
+import BoothFrame from "@/components/booth3d/BoothFrame";
 import { STYLE_PRESETS } from "@/lib/validation/strip";
 import type { StripFormat, StylePreset } from "@/lib/compositor";
 import { loadSessionShots, type SessionShotsMap } from "@/lib/sessionShotsStorage";
@@ -19,6 +21,15 @@ export interface StyleClientProps {
 }
 
 const DEFAULT_FORMAT: StripFormat = "3";
+
+// Left-panel plates on the booth shell, and the full-detail list below
+// `lg:` where those panels collapse out of view (same pattern as
+// CaptureClient / the landing page).
+const STYLE_INSTRUCTIONS = [
+  { title: "Pick a look", description: "Four presets, each applied to every frame on the strip." },
+  { title: "Watch it update", description: "The preview redraws instantly — nothing is committed yet." },
+  { title: "Continue", description: "Happy with it? Send the strip off to develop." },
+];
 
 export default function StyleClient({ sessionId }: StyleClientProps) {
   const router = useRouter();
@@ -108,39 +119,54 @@ export default function StyleClient({ sessionId }: StyleClientProps) {
   }
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-3xl flex-col items-center gap-8 px-4 py-16">
-      <div className="animate-fade-up text-center">
-        <p className="font-display text-sm italic text-rust-body">Style</p>
-        <h1 className="mt-2 font-display text-4xl italic text-ink">Pick a look</h1>
-        <p className="mt-2 font-sans text-sm text-ink-secondary">
-          Preview updates instantly — nothing is final until you continue.
-        </p>
-      </div>
+    <main className="mx-auto flex min-h-[100dvh] max-w-5xl flex-col items-center justify-center gap-6 px-4 py-12">
+      <BoothFrame
+        pose="result"
+        leftInstructions={STYLE_INSTRUCTIONS.map((item) => item.title)}
+        rightLabel="DEVELOP"
+        rightSublabel="Your strip is next"
+      >
+        <Card className="flex w-[min(92vw,420px)] flex-col gap-6 p-6 sm:p-8">
+          <div className="animate-fade-up text-center">
+            <p className="font-display text-sm text-rust-body">Style</p>
+            <h1 className="mt-2 font-display text-3xl text-ink">Pick a look</h1>
+            <p className="mt-2 font-sans text-sm text-ink-secondary">
+              Preview updates instantly — nothing is final until you continue.
+            </p>
+          </div>
 
-      <div className="grid w-full gap-8 sm:grid-cols-2">
-        <Card className="p-4">
-          <p className="mb-3 font-sans text-sm font-semibold text-ink">Preview</p>
+          {/* Bounded by height so the strip (roughly 1:3.7) sits inside the
+              booth rather than towering over its side panels. */}
           <StripPreview
             format={format}
             stylePreset={selectedPreset}
             shotsByParticipant={shotsByParticipant}
             participantCount={participantCount}
+            className="flex h-[360px] items-center justify-center"
           />
-        </Card>
 
-        <Card className="p-4">
-          <p className="mb-3 font-sans text-sm font-semibold text-ink">Choose a style</p>
-          <StylePicker selected={selectedPreset} onSelect={handleSelect} />
+          {/* The booth's control deck — the filter row sits under the screen,
+              mirroring docs/goal-ui.md's console layout. */}
+          <div>
+            <p className="mb-3 font-sans text-sm font-semibold text-ink">Choose a style</p>
+            <StylePicker selected={selectedPreset} onSelect={handleSelect} />
+          </div>
+
+          <Button
+            variant="primary"
+            onClick={goToGenerate}
+            className="w-full"
+          >
+            Continue to generate →
+          </Button>
+        </Card>
+      </BoothFrame>
+
+      <div className="w-full max-w-2xl lg:hidden">
+        <Card className="p-6 sm:p-8">
+          <NumberedList items={STYLE_INSTRUCTIONS} layout="columns" />
         </Card>
       </div>
-
-      <Button
-        variant="default"
-        onClick={goToGenerate}
-        className="border-forest bg-forest text-cream hover:bg-forest/90"
-      >
-        Continue to generate →
-      </Button>
     </main>
   );
 }

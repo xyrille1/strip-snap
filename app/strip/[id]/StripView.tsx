@@ -26,8 +26,8 @@ export default function StripView({ stripId, signedUrl }: StripViewProps) {
   return (
     <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-10 px-4 py-20">
       <div className="animate-fade-up text-center print:hidden">
-        <p className="font-display text-sm italic text-rust-body">Strip Snap</p>
-        <h1 className="mt-2 font-display text-5xl italic text-ink">A shared strip</h1>
+        <p className="font-display text-sm text-rust-body">Strip Snap</p>
+        <h1 className="mt-2 font-display text-5xl text-ink">A shared strip</h1>
         <p className="mt-3 font-sans text-sm text-ink-secondary">
           No account or invite needed — this link is all it takes.
         </p>

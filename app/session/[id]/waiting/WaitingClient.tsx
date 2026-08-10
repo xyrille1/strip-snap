@@ -329,8 +329,8 @@ export default function WaitingClient({ sessionId }: WaitingClientProps) {
       >
         <div className="flex w-[min(92vw,420px)] flex-col gap-6">
           <div className="text-center">
-            <p className="font-display text-sm italic text-rust-body">Waiting room</p>
-            <h1 className="mt-2 font-display text-3xl italic text-ink">
+            <p className="font-display text-sm text-rust-body">Waiting room</p>
+            <h1 className="mt-2 font-display text-3xl text-ink">
               Gathering everyone in the booth
             </h1>
           </div>
