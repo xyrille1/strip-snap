@@ -30,7 +30,7 @@ export default function StickerOverlay({ visible }: StickerOverlayProps) {
       <SparkleGlyph className="absolute -left-4 top-1/3 h-8 w-8 -rotate-12 text-forest" />
       <SparkleGlyph className="absolute bottom-6 right-6 h-6 w-6 rotate-12 text-rust-body" />
       <ScissorsGlyph className="absolute -bottom-4 -right-4 h-9 w-9 -rotate-[18deg] text-ink-secondary" />
-      <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 -rotate-2 rounded-full border border-hairline border-ink bg-cream px-3 py-1 font-display text-xs italic text-ink">
+      <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 -rotate-2 rounded-full border-booth-inner border-ink bg-cream px-3 py-1 font-display text-xs text-ink">
         tag me →
       </span>
     </div>

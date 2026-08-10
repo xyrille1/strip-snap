@@ -19,6 +19,14 @@ export interface StripPreviewProps {
    * shrinking the collage.
    */
   participantCount?: number;
+  /**
+   * Extra classes for the film-black frame around the canvas. Callers that
+   * place the preview inside the booth shell use this to bound its HEIGHT
+   * (e.g. `h-[420px] flex items-center justify-center`) — a composited strip
+   * is roughly 1:3.7, so left to size on width alone it renders ~1300px tall
+   * and pushes the rest of the screen off the fold.
+   */
+  className?: string;
 }
 
 /**
@@ -40,6 +48,7 @@ export default function StripPreview({
   stylePreset,
   shotsByParticipant,
   participantCount: participantCountOverride,
+  className,
 }: StripPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -90,9 +99,23 @@ export default function StripPreview({
   );
 
   return (
-    <div className="w-full overflow-hidden rounded-card-lg border border-hairline border-structural-gray bg-film-black p-2">
+    <div
+      className={[
+        "w-full overflow-hidden rounded-booth border-booth border-structural-gray bg-film-black p-2",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       {hasAnyShot ? (
-        <canvas ref={canvasRef} className="mx-auto block h-auto max-w-full" />
+        // `w-auto h-auto` + both max-* constraints let the canvas scale down
+        // against whichever axis is tighter while keeping its intrinsic
+        // aspect — width-bound when the frame is unconstrained (the original
+        // behaviour), height-bound when a caller sets a fixed height.
+        <canvas
+          ref={canvasRef}
+          className="mx-auto block h-auto max-h-full w-auto max-w-full"
+        />
       ) : (
         <p className="py-16 text-center font-sans text-sm text-cream/70">No shots yet.</p>
       )}
