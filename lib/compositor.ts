@@ -59,7 +59,7 @@ export interface StripLayout {
 // `aspect-[3/4]` (CameraView.tsx, PreviewClient.tsx) — a slot is drawn via
 // `drawImageCover` below, but keeping the slot's own aspect close to the
 // source's still keeps crop loss minimal in the common case.
-const CANVAS_MARGIN = 24;
+export const CANVAS_MARGIN = 24;
 const SLOT_GUTTER = 16;
 const SLOT_WIDTH = 360;
 const SLOT_HEIGHT = 480;
@@ -314,8 +314,8 @@ export function drawStrip(
 }
 
 // -- Sprocket-hole perforation ------------------------------------------
-const SPROCKET_HOLE_RADIUS = 4;
-const SPROCKET_HOLE_SPACING = 40;
+export const SPROCKET_HOLE_RADIUS = 4;
+export const SPROCKET_HOLE_SPACING = 40;
 
 /**
  * Punches a column of small round holes down each of the strip's two long
