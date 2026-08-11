@@ -16,6 +16,7 @@
     "@supabase/supabase-js": "^2.111.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
+    "fabric": "^6.9.1",
     "jose": "^6.2.5",
     "next": "14.2.35",
     "react": "^18",

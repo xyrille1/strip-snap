@@ -2,12 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import OutputActions from "@/components/booth/OutputActions";
-import StickerOverlay from "@/components/booth/StickerOverlay";
 import Photostrip from "@/components/booth3d/Photostrip";
-import { loadGeneratedStripId } from "@/lib/stripStorage";
+import { loadGeneratedStripId, saveGeneratedStripId } from "@/lib/stripStorage";
+
+// Fabric.js (the editor's canvas/drawing dependency) never loads on the
+// initial Output page view — only once "Edit strip" is actually clicked.
+const StripEditor = dynamic(() => import("@/components/booth/StripEditor"), {
+  ssr: false,
+});
 
 export interface OutputClientProps {
   sessionId: string;
@@ -37,7 +43,7 @@ type LoadState =
 export default function OutputClient({ sessionId }: OutputClientProps) {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [stickersVisible, setStickersVisible] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   useEffect(() => {
     const stripId = loadGeneratedStripId(sessionId);
@@ -91,30 +97,35 @@ export default function OutputClient({ sessionId }: OutputClientProps) {
   const { strip } = state;
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-10 px-4 py-20">
+    <main className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col items-center gap-5 px-4 py-8">
       <div className="animate-fade-up text-center print:hidden">
         <p className="font-display text-sm text-rust-body">Your strip</p>
         <h1 className="mt-2 font-display text-5xl text-ink">Ready</h1>
       </div>
 
       <div className="animate-fade-up">
-        <Photostrip
-          src={strip.signedUrl}
-          alt="Your finished photo strip"
-          overlay={<StickerOverlay visible={stickersVisible} />}
-        />
+        <Photostrip src={strip.signedUrl} alt="Your finished photo strip" />
       </div>
 
-      <Button
-        variant="default"
-        aria-pressed={stickersVisible}
-        onClick={() => setStickersVisible((v) => !v)}
-        className="print:hidden"
-      >
-        {stickersVisible ? "Hide stickers" : "Add stickers"}
+      <Button variant="default" onClick={() => setEditorOpen(true)} className="print:hidden">
+        Edit strip
       </Button>
 
       <OutputActions stripId={strip.id} />
+
+      {editorOpen ? (
+        <StripEditor
+          sessionId={sessionId}
+          stripId={strip.id}
+          stylePreset={strip.stylePreset}
+          onCancel={() => setEditorOpen(false)}
+          onSaved={(newStrip) => {
+            setState({ status: "ready", strip: newStrip });
+            saveGeneratedStripId(sessionId, newStrip.id);
+            setEditorOpen(false);
+          }}
+        />
+      ) : null}
     </main>
   );
 }
