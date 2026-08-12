@@ -36,9 +36,16 @@ type LoadState =
 /**
  * In-session finished-strip hero — the "signature moment" per design brief
  * §3 ("Output / share"): "full strip displayed large, centered... the most
- * whitespace on the whole site." Reads the strip id GenerateClient handed
- * off via lib/stripStorage.ts, then fetches GET /api/strips/:id (Phase 9 —
- * mints a fresh signed URL every call).
+ * whitespace on the whole site." Prefers the strip id GenerateClient handed
+ * off via lib/stripStorage.ts (GET /api/strips/:id, Phase 9 — mints a fresh
+ * signed URL every call), but that hand-off lives in `sessionStorage`, which
+ * is scoped to the ONE tab that ran /generate — a reload after the tab
+ * closed, a link opened in a new tab, or returning to this page later would
+ * otherwise all report "no strip" even though one genuinely exists
+ * server-side. Falls back to GET /api/strips?sessionId=:sessionId (looks up
+ * the latest strip for the session) whenever the hand-off is missing, and
+ * backfills it into sessionStorage on success so a later reload in this same
+ * tab skips straight back to the direct-by-id lookup.
  */
 export default function OutputClient({ sessionId }: OutputClientProps) {
   const router = useRouter();
@@ -46,27 +53,37 @@ export default function OutputClient({ sessionId }: OutputClientProps) {
   const [editorOpen, setEditorOpen] = useState(false);
 
   useEffect(() => {
-    const stripId = loadGeneratedStripId(sessionId);
-    if (!stripId) {
-      setState({ status: "no-handoff" });
-      return;
-    }
-
     let cancelled = false;
-    void fetch(`/api/strips/${stripId}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Could not load your strip.");
+
+    async function loadStrip() {
+      const stripId = loadGeneratedStripId(sessionId);
+      const url = stripId
+        ? `/api/strips/${stripId}`
+        : `/api/strips?sessionId=${sessionId}`;
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            if (!cancelled) setState({ status: "no-handoff" });
+            return;
+          }
+          throw new Error("Could not load your strip.");
+        }
         const strip = (await response.json()) as StripResponse;
         if (cancelled) return;
+        saveGeneratedStripId(sessionId, strip.id);
         setState({ status: "ready", strip });
-      })
-      .catch((err) => {
+      } catch (err) {
         if (cancelled) return;
         setState({
           status: "error",
           message: err instanceof Error ? err.message : "Could not load your strip.",
         });
-      });
+      }
+    }
+
+    void loadStrip();
 
     return () => {
       cancelled = true;

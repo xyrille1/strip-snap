@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { createStripSchema } from "@/lib/validation/strip";
+import { createStripSchema, listStripsBySessionQuerySchema } from "@/lib/validation/strip";
 import { checkRateLimit } from "@/lib/rateLimit";
 import { resolveClientIp } from "@/lib/http/clientIp";
 import { getSessionById } from "@/lib/db/sessions";
-import { createStrip } from "@/lib/db/strips";
+import { createStrip, getStripsBySessionId } from "@/lib/db/strips";
 import { uploadStripImage, mintSignedStripUrl } from "@/lib/storage";
 import { trackEvent } from "@/lib/analytics";
+
+// GET (list-by-session) needs the same "never let Next.js cache/reuse a
+// minted signed URL" guarantee GET /api/strips/:id documents at length —
+// same reasoning, so see that file for the full explanation of both flags.
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 
 /** backend-schema §5: signed URLs are 5-15 min (300-900s) expiry. Picked 10 min as the response's immediate URL. */
 const SIGNED_URL_EXPIRY_SECONDS = 600;
@@ -26,6 +32,12 @@ const SIGNED_URL_EXPIRY_SECONDS = 600;
 // 4-participant sessions) while still bounding well below the unbounded
 // abuse case the audit flagged.
 const CREATE_STRIP_RATE_LIMIT = { limit: 20, windowSeconds: 60 * 60 };
+
+// Mirrors GET /api/strips/:id's own GET_STRIP_RATE_LIMIT (60/hour/IP) — same
+// unauthenticated, re-fetch-friendly posture (view/download/share/print all
+// legitimately re-call this), just keyed by session lookups instead of a
+// single strip id.
+const LIST_STRIPS_RATE_LIMIT = { limit: 60, windowSeconds: 60 * 60 };
 
 // No `s` (dotAll) flag needed: the payload arrives as a JSON string value,
 // which can't contain a literal unescaped newline, so `.` already matches
@@ -166,6 +178,82 @@ export async function POST(request: NextRequest) {
     Sentry.captureException(error, { tags: { area: "api", route: "strips:create" } });
     return NextResponse.json(
       { error: "Failed to create strip" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * GET /api/strips?sessionId=:sessionId — look up the most recently created
+ * strip for a session, for when `lib/stripStorage.ts`'s `sessionStorage`
+ * hand-off isn't available on the current tab (a page reload after the tab
+ * closed and reopened, a shared/opened-in-a-new-tab link, or returning to
+ * `/session/:id/output` later) — OutputClient falls back to this once
+ * `loadGeneratedStripId` comes back empty, rather than reporting "no strip"
+ * for a session that actually has one server-side.
+ *
+ * Same unauthenticated posture as GET /api/strips/:id and GET
+ * /api/sessions/:id (see their route-level comments): the session id is
+ * itself the access-control mechanism (UUIDv4, non-guessable), and viewing
+ * an already-generated strip has never required login (F-28).
+ *
+ * A session can have more than one strip (each participant uploads their
+ * own, and re-editing via StripEditor creates a new row rather than
+ * overwriting) — this deliberately returns only the latest by `created_at`,
+ * matching "the strip this browser most recently produced/viewed" rather
+ * than an arbitrary or full list.
+ */
+export async function GET(request: NextRequest) {
+  const parsed = listStripsBySessionQuerySchema.safeParse({
+    sessionId: request.nextUrl.searchParams.get("sessionId"),
+  });
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid sessionId" }, { status: 400 });
+  }
+
+  const clientIp = resolveClientIp(request);
+  const { success } = await checkRateLimit(
+    `strips:list:${clientIp}`,
+    LIST_STRIPS_RATE_LIMIT
+  );
+  if (!success) {
+    return NextResponse.json(
+      { error: "Too many requests recently. Please try again later." },
+      { status: 429 }
+    );
+  }
+
+  try {
+    const strips = await getStripsBySessionId(parsed.data.sessionId);
+    if (strips.length === 0) {
+      return NextResponse.json(
+        { error: "No strip found for this session" },
+        { status: 404 }
+      );
+    }
+
+    const latest = strips.reduce((a, b) =>
+      new Date(a.created_at) > new Date(b.created_at) ? a : b
+    );
+    const signedUrl = await mintSignedStripUrl(
+      latest.storage_path,
+      SIGNED_URL_EXPIRY_SECONDS
+    );
+
+    return NextResponse.json(
+      {
+        id: latest.id,
+        sessionId: latest.session_id,
+        stylePreset: latest.style_preset,
+        signedUrl,
+        createdAt: latest.created_at,
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    Sentry.captureException(error, { tags: { area: "api", route: "strips:list" } });
+    return NextResponse.json(
+      { error: "Failed to look up strip" },
       { status: 500 }
     );
   }
