@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>StripEditor sizing/export fixture</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  #modal { position: fixed; inset: 0; display: flex; flex-direction: column; background: #00000080; }
+  #header { padding: 12px 16px; box-sizing: border-box; flex: 0 0 auto; }
+  #row {
+    flex: 1 1 0%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    overflow: auto;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+  @media (min-width: 640px) {
+    #row { flex-direction: row; align-items: flex-start; justify-content: center; }
+  }
+  #panel {
+    position: relative;
+    width: fit-content;
+    margin: 0 auto;
+    border: 3px solid black;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+  #tools {
+    width: 100%;
+    max-width: 384px;
+    flex-shrink: 0;
+    padding: 16px;
+    border: 3px solid black;
+    box-sizing: border-box;
+  }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="modal">
+  <div id="header"><p>Edit strip</p></div>
+  <div id="row">
+    <div id="panel">
+      <canvas id="canvas"></canvas>
+    </div>
+    <div id="tools">tools panel</div>
+  </div>
+</div>
+<script type="module">
+  // Mirrors components/booth/StripEditor.tsx's Fabric setup + fluid-sizing
+  // effect exactly, so this fixture's runtime behavior (export dimensions,
+  // on-screen sizing formula) stands in for the real component without
+  // needing the full app's Supabase/Clerk-backed session flow.
+  import { Canvas } from "../../../node_modules/fabric/dist/index.min.mjs";
+
+  const ROW_LAYOUT_MIN_WIDTH = 640;
+  const MAX_CANVAS_DISPLAY_WIDTH = 520;
+  const CANVAS_PANEL_CHROME = 24;
+  const TOOLS_PANEL_ROW_ALLOWANCE = 400;
+  const MOBILE_CANVAS_HEIGHT_SHARE = 0.55;
+
+  // lib/compositor.ts's computeStripLayout for format "4" (the tallest/most
+  // extreme aspect ratio — the worst case for the sizing math): canvasWidth =
+  // SLOT_WIDTH(360) + CANVAS_MARGIN(24)*2 = 408; canvasHeight = CANVAS_MARGIN*2
+  // + 4*SLOT_HEIGHT(480) + 3*SLOT_GUTTER(16) = 2016.
+  const CANVAS_WIDTH = 408;
+  const CANVAS_HEIGHT = 2016;
+  const canvasAspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+
+  const canvasEl = document.getElementById("canvas");
+  const canvas = new Canvas(canvasEl, { enableRetinaScaling: true, selection: true });
+  canvas.setDimensions({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }, { backstoreOnly: true });
+  canvas.lowerCanvasEl.style.width = "";
+  canvas.lowerCanvasEl.style.height = "";
+  canvas.upperCanvasEl.style.width = "";
+  canvas.upperCanvasEl.style.height = "";
+  canvas.wrapperEl.style.width = "";
+  canvas.wrapperEl.style.height = "";
+
+  canvas.backgroundColor = "#141210";
+  // Sticker stand-in, same math as StripEditor.handleAddSticker's targetSize.
+  const targetSize = 64;
+  const rect = new (await import("../../../node_modules/fabric/dist/index.min.mjs")).Rect({
+    left: canvas.getWidth() / 2,
+    top: canvas.getHeight() / 2,
+    originX: "center",
+    originY: "center",
+    width: targetSize,
+    height: targetSize,
+    fill: "#e2412c",
+  });
+  canvas.add(rect);
+  canvas.requestRenderAll();
+
+  const row = document.getElementById("row");
+
+  function applySizing() {
+    const rowRect = row.getBoundingClientRect();
+    const rowWidth = rowRect.width - 32; // row's own 16px*2 padding
+    const rowHeight = rowRect.height - 32;
+    const isRowLayout = window.innerWidth >= ROW_LAYOUT_MIN_WIDTH;
+
+    const availableWidth = Math.max(
+      isRowLayout
+        ? rowWidth - TOOLS_PANEL_ROW_ALLOWANCE - CANVAS_PANEL_CHROME
+        : rowWidth - CANVAS_PANEL_CHROME,
+      0
+    );
+    const availableHeight = Math.max(
+      isRowLayout
+        ? rowHeight - CANVAS_PANEL_CHROME
+        : rowHeight * MOBILE_CANVAS_HEIGHT_SHARE - CANVAS_PANEL_CHROME,
+      0
+    );
+
+    const fitWidth = Math.min(availableWidth, availableHeight * canvasAspect);
+    const displayWidth = Math.min(Math.max(fitWidth, 1), MAX_CANVAS_DISPLAY_WIDTH);
+    const displayHeight = displayWidth / canvasAspect;
+
+    for (const el of [canvas.lowerCanvasEl, canvas.upperCanvasEl, canvas.wrapperEl]) {
+      el.style.width = `${displayWidth}px`;
+      el.style.height = `${displayHeight}px`;
+      el.style.maxWidth = "none";
+      el.style.maxHeight = "none";
+    }
+
+    window.__lastComputed = { displayWidth, displayHeight, rowWidth, rowHeight, isRowLayout };
+  }
+
+  new ResizeObserver(applySizing).observe(row);
+  applySizing();
+
+  window.__exportCheck = async () => {
+    const dataUrl = canvas.toDataURL({ format: "png", multiplier: 1 });
+    const img = new Image();
+    const dims = await new Promise((resolve) => {
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.src = dataUrl;
+    });
+    return dims;
+  };
+  window.__canvasExpected = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
+  window.__fabricReady = true;
+</script>
+</body>
+</html>

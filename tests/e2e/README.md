@@ -1,0 +1,8 @@
+# E2E smoke tests
+
+Narrowly scoped, added alongside the responsiveness pass — not a full visual-regression suite. Two specs:
+
+- `strip-editor-export.spec.ts` — loads `fixtures/strip-editor-sizing.html` directly (no app server), a faithful replica of `components/booth/StripEditor.tsx`'s Fabric canvas setup and fluid-sizing effect. Asserts the exported strip image's pixel dimensions exactly match the fixed backstore size regardless of `enableRetinaScaling`/device pixel ratio, and that the on-screen canvas box grows on a wider/taller viewport — the one thing `vitest`'s jsdom environment can't verify, since it has no real `<canvas>`/Fabric rendering.
+- `overflow-check.spec.ts` — asserts no horizontal scroll appears across a phone/tablet/laptop/desktop viewport matrix, on the two routes reachable without a live session/camera/Supabase state (`/`, `/session/new`). The rest of the booth flow (waiting/capture/preview/style/generate/output) needs a real session + Realtime + camera permissions to drive automatically; that's covered by manual QA instead.
+
+Run with `npm run test:e2e` (requires `npx playwright install chromium` once). `overflow-check.spec.ts` runs against a production server (`next build && next start`, per `playwright.config.ts`'s `webServer`), not `next dev` — the dev server logs a harmless but noisy `Error: aborted`/ECONNRESET exception on every navigation-cancels-a-request race under parallel workers, which a production server doesn't do. That first run will take longer (a full build); subsequent runs reuse it locally via `reuseExistingServer` as long as the port-3100 server from the previous run is still up.

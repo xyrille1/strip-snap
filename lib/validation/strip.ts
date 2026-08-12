@@ -2,7 +2,11 @@ import { z } from "zod";
 
 /**
  * The fixed, small set of retro presets (docs only specify "small set of
- * retro presets" without naming them — these 4 are the locked decision).
+ * retro presets" without naming them — these 4 are the locked decision), plus
+ * `original` — a true no-filter pass-through (the camera's own colors,
+ * unmodified) for anyone who doesn't want a retro treatment at all.
+ * Appended at the end so `STYLE_PRESETS[0]` (the default selection elsewhere,
+ * e.g. StyleClient.tsx) stays `classic_bw`, unchanged by this addition.
  * Single source of truth: other files should import this rather than
  * redefine the list.
  */
@@ -11,6 +15,7 @@ export const STYLE_PRESETS = [
   "sepia",
   "vintage_warm",
   "high_contrast_mono",
+  "original",
 ] as const;
 
 /**

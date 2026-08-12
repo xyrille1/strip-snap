@@ -13,6 +13,7 @@ const PRESET_LABEL: Record<(typeof STYLE_PRESETS)[number], string> = {
   sepia: "Sepia",
   vintage_warm: "Vintage warm",
   high_contrast_mono: "High contrast mono",
+  original: "Original",
 };
 
 /**
@@ -31,6 +32,7 @@ const SWATCH_FILTER: Record<(typeof STYLE_PRESETS)[number], string> = {
   sepia: "sepia(100%)",
   vintage_warm: "sepia(35%) saturate(140%) contrast(105%) brightness(105%)",
   high_contrast_mono: "grayscale(100%) contrast(150%)",
+  original: "none",
 };
 
 export default function StylePicker({ selected, onSelect }: StylePickerProps) {
@@ -38,7 +40,7 @@ export default function StylePicker({ selected, onSelect }: StylePickerProps) {
     <div
       role="radiogroup"
       aria-label="Style preset"
-      className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+      className="grid grid-cols-2 gap-3 sm:grid-cols-5"
     >
       {STYLE_PRESETS.map((preset) => {
         const isSelected = preset === selected;

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Architects_Daughter, Space_Grotesk } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
@@ -37,6 +37,16 @@ export const metadata: Metadata = {
   title: "Strip Snap",
   description:
     "Strip Snap is an online retro photobooth — capture a synced photo strip with friends or a partner from anywhere, no app or hardware required.",
+};
+
+// `viewportFit: "cover"` is what makes `env(safe-area-inset-*)` (app/globals.css)
+// resolve to anything other than 0 on notched/home-indicator devices — without
+// it the safe-area padding there is silently inert.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#f5f6f8",
 };
 
 export default function RootLayout({

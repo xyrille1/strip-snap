@@ -269,12 +269,12 @@ describe("lib/realtime", () => {
     const sessionId = "88888888-8888-8888-8888-888888888888";
     const channel = realtime.getSessionChannel(sessionId);
 
-    await realtime.broadcastCountdownStart(sessionId, { serverTimestamp: 12345 });
+    await realtime.broadcastCountdownStart(sessionId, { serverTimestamp: 12345, leadMs: 5000 });
 
     expect(channel.send).toHaveBeenCalledWith({
       type: "broadcast",
       event: "countdown_start",
-      payload: { serverTimestamp: 12345 },
+      payload: { serverTimestamp: 12345, leadMs: 5000 },
     });
   });
 
@@ -290,9 +290,9 @@ describe("lib/realtime", () => {
       (b) => b.type === "broadcast" && b.filter.event === "countdown_start"
     );
     expect(binding).toBeDefined();
-    binding!.callback({ payload: { serverTimestamp: 999 } });
+    binding!.callback({ payload: { serverTimestamp: 999, leadMs: 10000 } });
 
-    expect(onCountdownStart).toHaveBeenCalledWith({ serverTimestamp: 999 });
+    expect(onCountdownStart).toHaveBeenCalledWith({ serverTimestamp: 999, leadMs: 10000 });
   });
 
   it("broadcastCaptureAck / subscribeToCaptureAck round-trip the participantId", async () => {
