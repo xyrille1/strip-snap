@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -13,6 +13,10 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./vitest.setup.ts"],
+    // tests/e2e is Playwright's testDir (see playwright.config.ts, `npm run
+    // test:e2e`) — its specs call Playwright's test()/beforeAll(), which
+    // throws when picked up by Vitest's own runner instead.
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
     // Integration tests share one local Supabase (Docker) stack across many
     // concurrent test files; under load (esp. Docker Desktop on Windows)
     // round-trips that take <150ms in isolation can exceed the 5s default
