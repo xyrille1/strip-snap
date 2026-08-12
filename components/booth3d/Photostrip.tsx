@@ -36,7 +36,7 @@ export default function Photostrip({ src, alt, overlay, className }: PhotostripP
         }
       }}
       className={[
-        "relative mx-auto block w-full max-w-sm cursor-pointer p-3 bg-panel border-booth border-structural-gray rounded-booth shadow-booth transition-transform duration-700 hover:scale-[1.02] print:transform-none print:shadow-none print:border-0 print:p-0",
+        "relative mx-auto block w-fit max-w-full cursor-pointer p-3 bg-panel border-booth border-structural-gray rounded-booth shadow-booth transition-transform duration-700 hover:scale-[1.02] print:transform-none print:shadow-none print:border-0 print:p-0",
         className,
       ]
         .filter(Boolean)
@@ -44,7 +44,11 @@ export default function Photostrip({ src, alt, overlay, className }: PhotostripP
       style={{ transform: `rotate(${rotation}deg)` }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL, not a static/optimizable asset. */}
-      <img src={src} alt={alt} className="block w-full rounded-[4px] bg-film-black p-2" />
+      <img
+        src={src}
+        alt={alt}
+        className="block h-auto max-h-[42dvh] w-auto max-w-[16rem] rounded-[4px] bg-film-black p-2 print:max-h-none print:max-w-none"
+      />
       {overlay}
     </div>
   );
