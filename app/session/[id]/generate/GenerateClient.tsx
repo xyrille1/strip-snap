@@ -413,7 +413,7 @@ export default function GenerateClient({ sessionId }: GenerateClientProps) {
           <p className="font-display text-sm text-rust-body">Developing</p>
 
           <div
-            className="flex h-[360px] w-full items-center justify-center overflow-hidden rounded-booth border-booth border-structural-gray bg-film-black p-2"
+            className="flex h-[clamp(220px,45dvh,380px)] w-full items-center justify-center overflow-hidden rounded-booth border-booth border-structural-gray bg-film-black p-2"
             aria-live="polite"
           >
             {developedDataUrl ? (

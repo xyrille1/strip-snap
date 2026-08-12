@@ -29,12 +29,15 @@ import {
 import {
   fetchServerNow,
   startCountdownSync,
+  DEFAULT_LEAD_MS,
+  LEAD_MS_OPTIONS,
   type CountdownSyncHandle,
+  type LeadDurationMs,
 } from "@/lib/countdownSync";
 import {
   MAX_PHOTOS,
-  runCaptureBurst,
-  type CaptureBurstHandle,
+  runCaptureSequence,
+  type CaptureSequenceHandle,
 } from "@/lib/captureBurst";
 import {
   loadStoredParticipant,
@@ -113,16 +116,17 @@ const COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS = 200;
  * `NumberedList`'s new `layout="columns"` variant — 3 columns at `sm:` and
  * up, collapsing to a horizontal-scroll row below it. Copy describes this
  * screen's actual, currently-implemented flow (no invented steps): camera
- * permission -> presence-driven synced countdown (see the "3./4. Countdown
- * election" effect below) -> the fixed `MAX_PHOTOS`-shot local burst that
- * fires automatically once the countdown reaches zero (see
- * `performCaptureBurst` below) — there is no per-shot button to press.
+ * permission + duration pick -> presence-driven synced countdown election
+ * (see the "3./4. Countdown election" effect below) -> `MAX_PHOTOS` rounds,
+ * each gated behind its own full countdown (see `performCaptureSequence`
+ * below) — there is no per-shot button to press, but every shot gets its
+ * own "get ready" beat rather than firing automatically back-to-back.
  */
 const CAPTURE_INSTRUCTIONS = [
   {
     title: "Get ready",
     description:
-      "Allow camera access and frame yourself in the shot — everyone in the group needs to be ready before capture can begin.",
+      "Allow camera access, frame yourself in the shot, and pick a 5s or 10s countdown — everyone in the group needs to be ready before capture can begin.",
   },
   {
     title: "Countdown starts together",
@@ -130,9 +134,9 @@ const CAPTURE_INSTRUCTIONS = [
       "The moment the whole group is ready, one synced countdown begins for everyone at the same instant.",
   },
   {
-    title: "Smile — 4 automatic shots",
+    title: "Four rounds, one at a time",
     description:
-      `Hold still through the burst: ${MAX_PHOTOS} shots fire back-to-back on their own, no need to trigger each one.`,
+      `Each of the ${MAX_PHOTOS} shots gets its own countdown: watch it tick down, strike your pose, then get ready again for the next.`,
   },
 ];
 
@@ -159,13 +163,25 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
   const [captured, setCaptured] = useState(false);
   const [capturedCount, setCapturedCount] = useState(0);
   const [expectedCount, setExpectedCount] = useState(0);
+  const [selectedLeadMs, setSelectedLeadMs] = useState<LeadDurationMs>(DEFAULT_LEAD_MS);
+  const [currentShotIndex, setCurrentShotIndex] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const participantRef = useRef<StoredParticipant | null>(null);
   const syncStartedRef = useRef(false);
   const syncHandleRef = useRef<CountdownSyncHandle | null>(null);
-  const burstHandleRef = useRef<CaptureBurstHandle | null>(null);
+  const burstHandleRef = useRef<CaptureSequenceHandle | null>(null);
   const expectedParticipantsRef = useRef<Set<string>>(new Set());
+  // Mirrors `selectedLeadMs` so the countdown-election effect (which must
+  // stay `[sessionId, state.step]`-only in its dependency array — see that
+  // effect's comment) can read the CURRENT picker value without closing
+  // over the state variable directly, which would force the effect to
+  // re-run every time the user toggles the picker.
+  const selectedLeadMsRef = useRef<LeadDurationMs>(DEFAULT_LEAD_MS);
+  // Stashes round 0's { firstTargetEpoch, leadMs } from onScheduled — read
+  // by performCaptureSequence (below) once the election locks in, since
+  // runCaptureSequence needs both to compute every later round's target.
+  const roundInfoRef = useRef<{ firstTargetEpoch: number; leadMs: number } | null>(null);
   // Keyed by shotKey(participantId, shotIndex) — every participant
   // contributes MAX_PHOTOS shots per session (see the doc comment on
   // SETTLE_TIMEOUT_MS above for why capture is never format-aware).
@@ -338,6 +354,10 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
     participantRef.current = state.step === "active" ? state.participant : null;
   }, [state]);
 
+  useEffect(() => {
+    selectedLeadMsRef.current = selectedLeadMs;
+  }, [selectedLeadMs]);
+
   // Leave the channel and cancel any pending timers on unmount (navigating
   // away from /capture entirely).
   useEffect(() => {
@@ -429,9 +449,9 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
 
   // Pure single-frame grab from the live video element — the "local
   // capture-execution helper" lib/captureBurst.ts's `captureFrame` dep
-  // calls once per shot in the burst. `shotIndex` doesn't affect what's
+  // calls once per shot in the sequence. `shotIndex` doesn't affect what's
   // drawn (it's just "whatever the camera shows right now"); it's part of
-  // the signature purely to match CaptureBurstDeps.
+  // the signature purely to match CaptureSequenceDeps.
   const captureFrame = useCallback((shotIndex: number): string | null => {
     void shotIndex;
     const video = videoRef.current;
@@ -451,19 +471,46 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
     return canvas.toDataURL("image/jpeg", CAPTURE_JPEG_QUALITY);
   }, []);
 
-  // 5./6. Runs the local rapid-fire burst (lib/captureBurst.ts) once the
-  // single synced countdown trigger fires — shot 0 is captured immediately,
-  // at the precise server-anchored instant; shots 1-3 follow at fixed local
-  // intervals, no re-election/re-broadcast per shot (TRD §3 only governs
-  // the ONE synced trigger, not the local follow-up shots). Assigned into
+  // ops-runbook.md §7: report countdown drift outliers with a real
+  // measurement (actual local fire time vs. scheduled target), not a
+  // guess. Shared between round 0's drift (reported by
+  // lib/countdownSync.ts's onCaptureTime, in the election effect below) and
+  // every later round's drift (reported by lib/captureBurst.ts's
+  // onRoundCaptureTime, in performCaptureSequence below) — the whole point
+  // of this instrumentation is catching a backgrounded/stalled tab, and the
+  // new 20-40s total sequence has far more exposure window for that than
+  // the old ~5s single countdown did. See COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS's
+  // doc comment for why 200ms.
+  const reportDriftIfOutlier = useCallback(
+    (shotIndex: number, driftMs: number) => {
+      if (driftMs > COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS) {
+        Sentry.captureException(
+          new Error(
+            `Countdown drift ${driftMs}ms exceeded the ${COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS}ms alert threshold`
+          ),
+          { tags: { area: "countdown_drift", session_id: sessionId, shot_index: shotIndex } }
+        );
+      }
+    },
+    [sessionId]
+  );
+
+  // 5./6. Runs the per-shot capture sequence (lib/captureBurst.ts) once the
+  // single synced countdown election hands off round 0's target — shot 0 is
+  // captured immediately, at the precise server-anchored instant; each
+  // subsequent shot is gated behind its own full re-armed countdown of the
+  // same `leadMs` duration the election settled on, with no re-election/
+  // re-broadcast per shot (TRD §3 only governs the ONE synced election, not
+  // the per-round local scheduling that follows it). Assigned into
   // performCaptureRef (declared above, with the other refs) so the
   // countdown-election effect below — set up only once, per syncStartedRef
   // — always invokes the latest version.
-  const performCaptureBurst = useCallback(() => {
+  const performCaptureSequence = useCallback(() => {
     const participant = participantRef.current;
-    if (!participant) return;
+    const roundInfo = roundInfoRef.current;
+    if (!participant || !roundInfo) return;
 
-    burstHandleRef.current = runCaptureBurst(
+    burstHandleRef.current = runCaptureSequence(
       {
         captureFrame,
         broadcastShot: (shotIndex, dataUrl) =>
@@ -485,10 +532,17 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
         },
       },
       {
+        // Re-points the on-screen countdown at the next round's target and
+        // advances the "Shot X of 4" progress text.
+        onRoundAdvance: (nextShotIndex, nextTargetEpoch) => {
+          setCountdownTarget(nextTargetEpoch);
+          setCurrentShotIndex(nextShotIndex);
+        },
+        onRoundCaptureTime: (shotIndex, driftMs) => reportDriftIfOutlier(shotIndex, driftMs),
         // Fires only once all MAX_PHOTOS shots are captured and broadcast —
         // never after shot 0 alone. This is the single point this
         // participant is considered "done": capture_ack broadcasts and the
-        // "captured" presence status both wait for the whole burst, not
+        // "captured" presence status both wait for the whole sequence, not
         // the first shot.
         onComplete: () => {
           ackedRef.current.add(participant.participantId);
@@ -504,26 +558,31 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
             }),
           ]).then(() => {
             // Resolved dropped-participant handling: proceed once every
-            // expected participant's full burst is in, or after
+            // expected participant's full sequence is in, or after
             // SETTLE_TIMEOUT_MS, whichever comes first — never hang
             // indefinitely on a participant who dropped.
             settleTimerRef.current = setTimeout(goToPreview, SETTLE_TIMEOUT_MS);
             maybeAdvanceAfterShotUpdate();
           });
         },
-      }
+      },
+      { firstTargetEpoch: roundInfo.firstTargetEpoch, leadMs: roundInfo.leadMs, maxPhotos: MAX_PHOTOS }
     );
-  }, [sessionId, captureFrame, goToPreview, maybeAdvanceAfterShotUpdate]);
+  }, [sessionId, captureFrame, goToPreview, maybeAdvanceAfterShotUpdate, reportDriftIfOutlier]);
 
   // Keep the ref pointed at the latest closure on every render (cheap plain
   // assignment, not a hook — order relative to hooks doesn't matter here).
   performCaptureRef.current = async () => {
-    performCaptureBurst();
+    performCaptureSequence();
   };
 
   // 3./4. Countdown election + server-anchored scheduling (lib/countdownSync.ts),
   // started exactly once, the first time presence reports every currently
-  // connected participant ready.
+  // connected participant ready. Dependency array intentionally stays
+  // `[sessionId, state.step]`-only — it must NOT re-run when the user
+  // toggles the duration picker, so `selectedLeadMs` is read via
+  // `selectedLeadMsRef` (kept in sync by the effect above) rather than
+  // closed over directly.
   useEffect(() => {
     if (state.step !== "active") return;
 
@@ -546,29 +605,29 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
           subscribeToCountdown: (onStart) => subscribeToCountdown(sessionId, onStart),
         },
         {
-          onScheduled: (localTargetEpoch) => setCountdownTarget(localTargetEpoch),
+          onScheduled: (localTargetEpoch, _serverTimestamp, leadMs) => {
+            roundInfoRef.current = { firstTargetEpoch: localTargetEpoch, leadMs };
+            setCountdownTarget(localTargetEpoch);
+            setCurrentShotIndex(0);
+          },
           onCaptureTime: (driftMs) => {
             // ops-runbook.md §7: report countdown drift outliers with a
             // real measurement (actual local fire time vs. scheduled
             // target — computed in lib/countdownSync.ts, which is the only
-            // module with visibility into both), not a guess. See
-            // COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS's doc comment for why
-            // 200ms.
-            if (driftMs > COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS) {
-              Sentry.captureException(
-                new Error(
-                  `Countdown drift ${driftMs}ms exceeded the ${COUNTDOWN_DRIFT_ALERT_THRESHOLD_MS}ms alert threshold`
-                ),
-                { tags: { area: "countdown_drift", session_id: sessionId } }
-              );
-            }
+            // module with visibility into both), not a guess. This is
+            // round 0's drift specifically — later rounds' drift is
+            // reported via lib/captureBurst.ts's onRoundCaptureTime, inside
+            // performCaptureSequence above.
+            reportDriftIfOutlier(0, driftMs);
             void performCaptureRef.current();
           },
-        }
+        },
+        { leadMs: selectedLeadMsRef.current }
       );
     });
 
     return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally NOT re-run on selectedLeadMs/reportDriftIfOutlier changes; selectedLeadMsRef/reportDriftIfOutlier (stable per sessionId) are read fresh via closure each time this effect itself re-runs off sessionId/state.step, per this effect's doc comment above.
   }, [sessionId, state.step]);
 
   // Accumulate other participants' relayed shots/acks in memory (never
@@ -627,6 +686,38 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
         </h1>
       </div>
 
+      {/* Per-shot countdown duration picker — no "host": whichever
+          participant's device wins the election (see the "3./4. Countdown
+          election" effect above) broadcasts its own currently-selected
+          value here, and every other participant adopts it, discarding
+          their own pick if it differed. Disabled once the election has
+          locked in (countdownTarget goes non-null at onScheduled and stays
+          non-null through all MAX_PHOTOS rounds) — further clicks are
+          simply inert after that point, and the disabled state shows
+          whatever the group actually landed on. */}
+      <div className="flex flex-col items-center gap-2" role="radiogroup" aria-label="Countdown length per shot">
+        <p className="font-sans text-xs text-ink-secondary">Countdown length</p>
+        <div className="flex gap-2">
+          {LEAD_MS_OPTIONS.map((ms) => (
+            <Button
+              key={ms}
+              // variant="primary" is the documented correct way to show a
+              // "selected" state (see Button.tsx's doc comment) — passing a
+              // raw className to override a "default" button's background
+              // silently fails due to Tailwind's stylesheet-order
+              // resolution, a real bug this codebase already shipped once.
+              variant={selectedLeadMs === ms ? "primary" : "default"}
+              role="radio"
+              aria-checked={selectedLeadMs === ms}
+              disabled={countdownTarget !== null}
+              onClick={() => setSelectedLeadMs(ms)}
+            >
+              {ms / 1000}s
+            </Button>
+          ))}
+        </div>
+      </div>
+
       <BoothFrame
         pose="active"
         leftInstructions={CAPTURE_INSTRUCTIONS.map((item) => item.title)}
@@ -643,6 +734,10 @@ export default function CaptureClient({ sessionId }: CaptureClientProps) {
                   {Math.max(expectedCount, 1)})
                 </Badge>
               </div>
+            ) : currentShotIndex !== null ? (
+              <p className="text-center font-sans text-xs text-ink-secondary">
+                Shot {currentShotIndex + 1} of {MAX_PHOTOS}
+              </p>
             ) : (
               <p className="text-center font-sans text-xs text-ink-secondary">
                 {blocked ? "Camera unavailable" : "Everyone ready starts the countdown"}

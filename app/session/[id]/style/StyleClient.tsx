@@ -136,13 +136,15 @@ export default function StyleClient({ sessionId }: StyleClientProps) {
           </div>
 
           {/* Bounded by height so the strip (roughly 1:3.7) sits inside the
-              booth rather than towering over its side panels. */}
+              booth rather than towering over its side panels. Fluid (not a
+              fixed 360px) so it doesn't squeeze the controls below it on
+              short/landscape mobile viewports. */}
           <StripPreview
             format={format}
             stylePreset={selectedPreset}
             shotsByParticipant={shotsByParticipant}
             participantCount={participantCount}
-            className="flex h-[360px] items-center justify-center"
+            className="flex h-[clamp(220px,45dvh,380px)] items-center justify-center"
           />
 
           {/* The booth's control deck — the filter row sits under the screen,

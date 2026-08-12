@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 export interface CountdownProps {
   /**
@@ -14,6 +14,14 @@ export interface CountdownProps {
 
 const TICK_MS = 100;
 
+// This component is reached from server-rendered page shells, and a bare
+// useLayoutEffect logs a "does nothing on the server" warning if reached
+// during SSR — fall back to useEffect there; resolves to the real,
+// before-paint useLayoutEffect in the browser, which is what the fix below
+// depends on.
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 /**
  * Renders a live countdown against `targetTimestamp`. Purely a display
  * concern — this component never triggers capture itself (that stays in
@@ -26,8 +34,17 @@ const TICK_MS = 100;
 export default function Countdown({ targetTimestamp }: CountdownProps) {
   const [now, setNow] = useState(() => Date.now());
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (targetTimestamp === null) return;
+    // `now` is stale here on the first render after targetTimestamp flips
+    // from null to a real epoch: it was captured back at mount, during
+    // whatever null-target wait preceded this (e.g. the countdown election
+    // or a camera-permission prompt), which the interval below never ran
+    // during. Refreshing synchronously (pre-paint, via useLayoutEffect)
+    // stops that staleness from inflating remainingMs enough to round
+    // secondsRemaining up one extra second (e.g. a flash of "6" before a
+    // 5s countdown).
+    setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(interval);
   }, [targetTimestamp]);
@@ -48,7 +65,7 @@ export default function Countdown({ targetTimestamp }: CountdownProps) {
       aria-live="polite"
       aria-label="Countdown to capture"
     >
-      <span className="font-display text-7xl text-ink tabular-nums">
+      <span className="font-display text-7xl text-white tabular-nums">
         {secondsRemaining > 0 ? secondsRemaining : "•"}
       </span>
       <span className="font-sans text-sm text-ink-secondary">

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CountdownStartPayload } from "./realtime";
-import { FIXED_LEAD_MS, JITTER_MAX_MS, startCountdownSync } from "./countdownSync";
+import {
+  DEFAULT_LEAD_MS,
+  JITTER_MAX_MS,
+  LEAD_MS_OPTIONS,
+  startCountdownSync,
+} from "./countdownSync";
 
 /**
  * Deterministic fake clock, decoupled from vi's fake timers. vi's fake
@@ -46,9 +51,9 @@ describe("lib/countdownSync#startCountdownSync", () => {
     vi.useRealTimers();
   });
 
-  it("exports FIXED_LEAD_MS in the documented 3000-5000ms range and JITTER_MAX_MS in the documented 0-400ms range", () => {
-    expect(FIXED_LEAD_MS).toBeGreaterThanOrEqual(3000);
-    expect(FIXED_LEAD_MS).toBeLessThanOrEqual(5000);
+  it("exports LEAD_MS_OPTIONS as [5000, 10000], DEFAULT_LEAD_MS as 5000, and JITTER_MAX_MS in the documented 0-400ms range", () => {
+    expect(LEAD_MS_OPTIONS).toEqual([5000, 10000]);
+    expect(DEFAULT_LEAD_MS).toBe(5000);
     expect(JITTER_MAX_MS).toBeGreaterThan(0);
     expect(JITTER_MAX_MS).toBeLessThanOrEqual(400);
   });
@@ -64,20 +69,20 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
     );
 
     // jitter delay = floor(0 * 400) = 0ms
     await clock.tick(0);
 
     expect(fetchServerNow).toHaveBeenCalledTimes(1);
-    expect(broadcastCountdownStart).toHaveBeenCalledWith({ serverTimestamp: 9000 });
+    expect(broadcastCountdownStart).toHaveBeenCalledWith({ serverTimestamp: 10000, leadMs: 5000 });
     // offsetMs = serverNow(5000) - localNowAtReading(0) = 5000
-    // localTargetEpoch = serverTimestamp(9000) + offsetMs(5000) = 14000
-    expect(onScheduled).toHaveBeenCalledWith(14000, 9000);
+    // localTargetEpoch = serverTimestamp(10000) + offsetMs(5000) = 15000
+    expect(onScheduled).toHaveBeenCalledWith(15000, 10000, 5000);
     expect(onCaptureTime).not.toHaveBeenCalled();
 
-    await clock.tick(14000);
+    await clock.tick(15000);
     expect(onCaptureTime).toHaveBeenCalledTimes(1);
   });
 
@@ -92,7 +97,7 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
     );
 
     await clock.tick(0); // jitter fires, volunteers, schedules
@@ -114,20 +119,20 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 1 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 1 }
       // jitter delay = floor(1 * 400) = 400ms — never advance timers that far
     );
 
-    deliver({ serverTimestamp: 10000 });
+    deliver({ serverTimestamp: 10000, leadMs: 4000 });
     await clock.tick(0); // flush the async handleReceived microtasks
 
     expect(broadcastCountdownStart).not.toHaveBeenCalled(); // this client never volunteered
     expect(onScheduled).toHaveBeenCalledTimes(1);
     // offsetMs = serverNow(6000) - now()(0) = 6000; localTargetEpoch = 10000 + 6000 = 16000
-    expect(onScheduled).toHaveBeenCalledWith(16000, 10000);
+    expect(onScheduled).toHaveBeenCalledWith(16000, 10000, 4000);
 
     // A second, later broadcast arrives — must be ignored (first received wins).
-    deliver({ serverTimestamp: 99999 });
+    deliver({ serverTimestamp: 99999, leadMs: 4000 });
     await clock.tick(0);
     expect(onScheduled).toHaveBeenCalledTimes(1);
 
@@ -138,6 +143,38 @@ describe("lib/countdownSync#startCountdownSync", () => {
     // Capture still fires off the FIRST payload's schedule (16000), not the second's.
     await clock.tick(16000 - 400);
     expect(onCaptureTime).toHaveBeenCalledTimes(1);
+  });
+
+  it("no host, winner decides: a client with its own leadMs selection adopts the broadcaster's leadMs instead when it receives a countdown_start before its own jitter fires, and never broadcasts itself", async () => {
+    const clock = createClock(0);
+    const { subscribeToCountdown, deliver } = fakeSubscribeToCountdown();
+    const fetchServerNow = vi.fn().mockResolvedValue(6000);
+    const broadcastCountdownStart = vi.fn().mockResolvedValue(undefined);
+    const onScheduled = vi.fn();
+    const onCaptureTime = vi.fn();
+
+    // This client's own local selection is 10000ms — but another client
+    // wins the election and broadcasts leadMs: 5000. This client must adopt
+    // 5000 (the winner's value), not its own 10000 selection, and must
+    // never itself broadcast (it never volunteered — a broadcast arrived
+    // before its jitter fired).
+    startCountdownSync(
+      { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
+      { onScheduled, onCaptureTime },
+      { leadMs: 10000, jitterMaxMs: 400, now: clock.now, random: () => 1 }
+      // jitter delay = floor(1 * 400) = 400ms — never advance timers that far
+    );
+
+    deliver({ serverTimestamp: 10000, leadMs: 5000 });
+    await clock.tick(0); // flush the async handleReceived microtasks
+
+    expect(broadcastCountdownStart).not.toHaveBeenCalled(); // this client never volunteered
+    // offsetMs = serverNow(6000) - now()(0) = 6000; localTargetEpoch = 10000 + 6000 = 16000
+    expect(onScheduled).toHaveBeenCalledWith(16000, 10000, 5000); // leadMs === 5000, the broadcaster's value — not this client's own 10000
+
+    // Advancing past the (never-fired) jitter delay must still never trigger a volunteer broadcast.
+    await clock.tick(400);
+    expect(broadcastCountdownStart).not.toHaveBeenCalled();
   });
 
   it("ignores a second countdown_start received after this client already volunteered and scheduled off its own broadcast", async () => {
@@ -151,15 +188,15 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 3000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
     );
 
-    await clock.tick(0); // volunteers: serverTimestamp = 2000 + 3000 = 5000
-    // offsetMs = serverNow(2000) - localNowAtReading(0) = 2000; localTargetEpoch = 5000 + 2000 = 7000
-    expect(onScheduled).toHaveBeenCalledWith(7000, 5000);
+    await clock.tick(0); // volunteers: serverTimestamp = 2000 + 5000 = 7000
+    // offsetMs = serverNow(2000) - localNowAtReading(0) = 2000; localTargetEpoch = 7000 + 2000 = 9000
+    expect(onScheduled).toHaveBeenCalledWith(9000, 7000, 5000);
 
     // A late straggler broadcast (e.g. another client's own jitter fired moments later).
-    deliver({ serverTimestamp: 77777 });
+    deliver({ serverTimestamp: 77777, leadMs: 3000 });
     await clock.tick(0);
     expect(onScheduled).toHaveBeenCalledTimes(1);
   });
@@ -175,12 +212,12 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 0.5 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0.5 }
       // jitter delay = floor(0.5 * 400) = 200ms
     );
 
     await clock.tick(100); // before the jitter fires
-    deliver({ serverTimestamp: 8000 });
+    deliver({ serverTimestamp: 8000, leadMs: 4000 });
     await clock.tick(0); // flush handleReceived
 
     expect(onScheduled).toHaveBeenCalledTimes(1);
@@ -202,13 +239,13 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 1 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 1 }
     );
 
-    deliver({ serverTimestamp: 9500 });
+    deliver({ serverTimestamp: 9500, leadMs: 4000 });
     await clock.tick(0);
 
-    expect(onScheduled).toHaveBeenCalledWith(9500, 9500); // offset 0 -> localTargetEpoch === serverTimestamp
+    expect(onScheduled).toHaveBeenCalledWith(9500, 9500, 4000); // offset 0 -> localTargetEpoch === serverTimestamp
     expect(consoleErrorSpy).toHaveBeenCalled();
 
     await clock.tick(9500 - 500);
@@ -232,7 +269,7 @@ describe("lib/countdownSync#startCountdownSync", () => {
     startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
     );
 
     await clock.tick(0); // jitter fires, volunteer's fetchServerNow rejects
@@ -240,9 +277,9 @@ describe("lib/countdownSync#startCountdownSync", () => {
     expect(onScheduled).not.toHaveBeenCalled();
 
     // Another client's broadcast arrives afterward — still usable.
-    deliver({ serverTimestamp: 6000 });
+    deliver({ serverTimestamp: 6000, leadMs: 4000 });
     await clock.tick(0);
-    expect(onScheduled).toHaveBeenCalledWith(9000, 6000); // offsetMs = 3000 - 0
+    expect(onScheduled).toHaveBeenCalledWith(9000, 6000, 4000); // offsetMs = 3000 - 0
 
     consoleErrorSpy.mockRestore();
   });
@@ -258,7 +295,7 @@ describe("lib/countdownSync#startCountdownSync", () => {
     const handle = startCountdownSync(
       { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
       { onScheduled, onCaptureTime },
-      { leadMs: 4000, jitterMaxMs: 400, now: clock.now, random: () => 0.9 }
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0.9 }
       // jitter delay = 360ms
     );
 

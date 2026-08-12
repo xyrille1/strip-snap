@@ -177,9 +177,9 @@ export function computeStripLayout(
 
 // -- Canvas filter per style preset -------------------------------------
 // STYLE_PRESETS (lib/validation/strip.ts): classic_bw, sepia, vintage_warm,
-// high_contrast_mono. Implemented as CSS-syntax Canvas 2D `filter` strings —
-// simple, well-supported, and enough to realize each preset's name without
-// inventing presets that aren't in the locked list.
+// high_contrast_mono, original. Implemented as CSS-syntax Canvas 2D `filter`
+// strings — simple, well-supported, and enough to realize each preset's name
+// without inventing presets that aren't in the locked list.
 const STYLE_FILTERS: Record<StylePreset, string> = {
   classic_bw: "grayscale(100%)",
   sepia: "sepia(100%)",
@@ -187,6 +187,8 @@ const STYLE_FILTERS: Record<StylePreset, string> = {
   // lift so it reads as "warm" rather than just "washed out."
   vintage_warm: "sepia(35%) saturate(140%) contrast(105%) brightness(105%)",
   high_contrast_mono: "grayscale(100%) contrast(150%)",
+  // True pass-through — the camera's own colors, no treatment applied.
+  original: "none",
 };
 
 /**

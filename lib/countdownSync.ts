@@ -30,25 +30,26 @@ import type { CountdownStartPayload } from "./realtime";
  */
 
 /**
- * Fixed lead time (ms) between broadcasting `countdown_start` and the
- * server-anchored instant it announces for capture.
+ * User-selectable lead time (ms) between broadcasting `countdown_start` and
+ * the server-anchored instant it announces for capture. Per-shot: this same
+ * duration is re-applied before EACH of the `MAX_PHOTOS` shots (see
+ * lib/captureBurst.ts's `runCaptureSequence`), not just once.
  *
- * Picked from the middle of the product spec's suggested 3000-5000ms range:
- * comfortably exceeds realistic broadcast + `GET /api/time` round-trip
- * latency (typically well under a few hundred ms, even on a throttled or
- * asymmetric connection per TRD §8's LDR/network-jitter risk), leaving
- * every participant's client time to receive the broadcast and prepare
- * (TRD §3) — while still reading as a natural photobooth "3…2…1" countdown
- * rather than an anxious wait, per the design brief's "quiet, patient tone."
+ * There is no "host" — every participant picks their own value locally, but
+ * only the winning client's own currently-selected value (closed over in
+ * `volunteer()` below) is actually broadcast and adopted by the whole group,
+ * via the `leadMs` field now carried on `CountdownStartPayload`.
  */
-export const FIXED_LEAD_MS = 4000;
+export const LEAD_MS_OPTIONS = [5000, 10000] as const;
+export type LeadDurationMs = (typeof LEAD_MS_OPTIONS)[number];
+export const DEFAULT_LEAD_MS: LeadDurationMs = 5000;
 
 /**
  * Upper bound (ms) of the randomized delay each client waits, after
  * observing "all ready," before volunteering to broadcast `countdown_start`
  * itself.
  *
- * Small relative to FIXED_LEAD_MS so even the worst case (this client is
+ * Small relative to the selected leadMs (LEAD_MS_OPTIONS) so even the worst case (this client is
  * the one that ends up volunteering) barely dents the lead-time budget.
  * Wide enough (0-400ms, uniformly distributed) that when N clients hit "all
  * ready" within the same tick, the chance of two picking the *same* delay
@@ -74,8 +75,15 @@ export interface CountdownSyncCallbacks {
    * local-clock target via this client's own clock-offset correction. Feed
    * `localTargetEpoch` into <Countdown /> so it renders a real countdown
    * against this client's own clock, not the raw server timestamp.
+   *
+   * `leadMs` is the WINNING client's per-shot duration — this client's own
+   * `options.leadMs` selection if this client won the election (volunteered),
+   * or the broadcaster's value if this client instead received the winning
+   * broadcast. The caller should stash both `localTargetEpoch` and `leadMs`
+   * (e.g. in a ref) to compute later rounds' targets itself — see
+   * lib/captureBurst.ts's `runCaptureSequence`.
    */
-  onScheduled: (localTargetEpoch: number, serverTimestamp: number) => void;
+  onScheduled: (localTargetEpoch: number, serverTimestamp: number, leadMs: number) => void;
   /**
    * Fires exactly once, from the `setTimeout` armed at the computed local
    * target. This is the ONLY place capture should ever be triggered from —
@@ -95,7 +103,7 @@ export interface CountdownSyncCallbacks {
 }
 
 export interface CountdownSyncOptions {
-  leadMs?: number;
+  leadMs?: LeadDurationMs;
   jitterMaxMs?: number;
   /** Injectable clock — defaults to Date.now/Math.random. Tests only. */
   now?: () => number;
@@ -112,7 +120,7 @@ export function startCountdownSync(
   callbacks: CountdownSyncCallbacks,
   options: CountdownSyncOptions = {}
 ): CountdownSyncHandle {
-  const leadMs = options.leadMs ?? FIXED_LEAD_MS;
+  const leadMs = options.leadMs ?? DEFAULT_LEAD_MS;
   const jitterMaxMs = options.jitterMaxMs ?? JITTER_MAX_MS;
   const now = options.now ?? Date.now;
   const random = options.random ?? Math.random;
@@ -123,7 +131,7 @@ export function startCountdownSync(
   let jitterTimer: ReturnType<typeof setTimeout> | null = null;
   let captureTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function schedule(serverTimestamp: number, offsetMs: number) {
+  function schedule(serverTimestamp: number, offsetMs: number, roundLeadMs: number) {
     // This check-and-set is synchronous (no `await` between them), so it's
     // atomic against the async races between handleReceived and volunteer
     // below — whichever call reaches this line first wins; a second call
@@ -139,7 +147,7 @@ export function startCountdownSync(
     }
 
     const localTargetEpoch = serverTimestamp + offsetMs;
-    callbacks.onScheduled(localTargetEpoch, serverTimestamp);
+    callbacks.onScheduled(localTargetEpoch, serverTimestamp, roundLeadMs);
 
     const delayMs = Math.max(0, localTargetEpoch - now());
     // TRD §3 hard requirement: capture is scheduled off this computed,
@@ -172,7 +180,17 @@ export function startCountdownSync(
         err
       );
     }
-    schedule(payload.serverTimestamp, offsetMs);
+    // Critical to the "no host, winner decides for the group" mechanic: a
+    // client that loses the election adopts the BROADCASTER's leadMs here
+    // (payload.leadMs), discarding its own local `options.leadMs` selection
+    // entirely. `payload` crossed the wire from another client's browser, so
+    // the TS type is not a runtime guarantee — a stale client from a
+    // mid-session deploy could broadcast a payload from before `leadMs`
+    // existed. Falling back to DEFAULT_LEAD_MS keeps a bad/missing value
+    // from propagating into captureBurst.ts's `targets` array as NaN
+    // (which would make every round after the first fire immediately).
+    const roundLeadMs = Number.isFinite(payload.leadMs) ? payload.leadMs : DEFAULT_LEAD_MS;
+    schedule(payload.serverTimestamp, offsetMs, roundLeadMs);
   }
 
   async function volunteer() {
@@ -195,7 +213,11 @@ export function startCountdownSync(
     const serverTimestamp = serverNow + leadMs;
 
     try {
-      await deps.broadcastCountdownStart({ serverTimestamp });
+      // This client's own currently-selected duration (closed over from
+      // `options.leadMs` at the top of this function) is what gets
+      // broadcast — every other client adopts it via handleReceived above,
+      // discarding their own pick if it differed. No host, no DB storage.
+      await deps.broadcastCountdownStart({ serverTimestamp, leadMs });
     } catch (err) {
       console.error(
         "[countdownSync] failed to broadcast countdown_start; scheduling this client's own capture anyway",
@@ -206,7 +228,7 @@ export function startCountdownSync(
       // still needs to capture at *some* point rather than hang.
     }
 
-    schedule(serverTimestamp, serverNow - localNowAtReading);
+    schedule(serverTimestamp, serverNow - localNowAtReading, leadMs);
   }
 
   const unsubscribe = deps.subscribeToCountdown((payload) => {
