@@ -78,11 +78,54 @@ describe("lib/countdownSync#startCountdownSync", () => {
     expect(fetchServerNow).toHaveBeenCalledTimes(1);
     expect(broadcastCountdownStart).toHaveBeenCalledWith({ serverTimestamp: 10000, leadMs: 5000 });
     // offsetMs = serverNow(5000) - localNowAtReading(0) = 5000
-    // localTargetEpoch = serverTimestamp(10000) + offsetMs(5000) = 15000
-    expect(onScheduled).toHaveBeenCalledWith(15000, 10000, 5000);
+    // localTargetEpoch = serverTimestamp(10000) - offsetMs(5000) = 5000
+    expect(onScheduled).toHaveBeenCalledWith(5000, 10000, 5000);
     expect(onCaptureTime).not.toHaveBeenCalled();
 
-    await clock.tick(15000);
+    await clock.tick(5000);
+    expect(onCaptureTime).toHaveBeenCalledTimes(1);
+  });
+
+  it("regression: when this client's local clock runs AHEAD of the server's, still schedules a real leadMs in the future rather than firing instantly (the exact clock-skew sign bug that caused instant, countdown-less capture in production — invisible in local dev, where client and server share one system clock)", async () => {
+    // Local clock starts at 5000; the server reading below resolves to 0 —
+    // i.e. at this same real instant, this client's clock reads 5000 while
+    // the server's reads 0, so the client is running 5s AHEAD of the
+    // server. Every OTHER test in this file has the server reading equal to
+    // or ahead of a clock that starts at 0 — this is the only one testing
+    // the opposite direction, which is exactly the direction the sign bug
+    // (`serverTimestamp + offsetMs` instead of `- offsetMs`) collapsed into
+    // an already-past target, silently clamped to an instant fire by
+    // `Math.max(0, …)`.
+    const clock = createClock(5000);
+    const { subscribeToCountdown } = fakeSubscribeToCountdown();
+    const fetchServerNow = vi.fn().mockResolvedValue(0);
+    const broadcastCountdownStart = vi.fn().mockResolvedValue(undefined);
+    const onScheduled = vi.fn();
+    const onCaptureTime = vi.fn();
+
+    startCountdownSync(
+      { fetchServerNow, broadcastCountdownStart, subscribeToCountdown },
+      { onScheduled, onCaptureTime },
+      { leadMs: 5000, jitterMaxMs: 400, now: clock.now, random: () => 0 }
+    );
+
+    await clock.tick(0); // jitter fires, volunteers
+
+    expect(broadcastCountdownStart).toHaveBeenCalledWith({ serverTimestamp: 5000, leadMs: 5000 });
+    // offsetMs = serverNow(0) - localNowAtReading(5000) = -5000
+    // localTargetEpoch = serverTimestamp(5000) - offsetMs(-5000) = 10000 —
+    // a real 5000ms after the current local clock reading of 5000, exactly
+    // leadMs later, regardless of the skew. The buggy `+offsetMs` version
+    // would instead compute 0 — 5000ms in the PAST relative to the current
+    // local clock — clamped to an instant fire.
+    expect(onScheduled).toHaveBeenCalledWith(10000, 5000, 5000);
+    expect(onCaptureTime).not.toHaveBeenCalled();
+
+    // Advancing to just short of the target must NOT have fired yet —
+    // proves this is a real 5s-out schedule, not an instant/clamped-to-0 one.
+    await clock.tick(4999);
+    expect(onCaptureTime).not.toHaveBeenCalled();
+    await clock.tick(1);
     expect(onCaptureTime).toHaveBeenCalledTimes(1);
   });
 
@@ -128,8 +171,8 @@ describe("lib/countdownSync#startCountdownSync", () => {
 
     expect(broadcastCountdownStart).not.toHaveBeenCalled(); // this client never volunteered
     expect(onScheduled).toHaveBeenCalledTimes(1);
-    // offsetMs = serverNow(6000) - now()(0) = 6000; localTargetEpoch = 10000 + 6000 = 16000
-    expect(onScheduled).toHaveBeenCalledWith(16000, 10000, 4000);
+    // offsetMs = serverNow(6000) - now()(0) = 6000; localTargetEpoch = 10000 - 6000 = 4000
+    expect(onScheduled).toHaveBeenCalledWith(4000, 10000, 4000);
 
     // A second, later broadcast arrives — must be ignored (first received wins).
     deliver({ serverTimestamp: 99999, leadMs: 4000 });
@@ -140,8 +183,8 @@ describe("lib/countdownSync#startCountdownSync", () => {
     await clock.tick(400);
     expect(broadcastCountdownStart).not.toHaveBeenCalled();
 
-    // Capture still fires off the FIRST payload's schedule (16000), not the second's.
-    await clock.tick(16000 - 400);
+    // Capture still fires off the FIRST payload's schedule (4000), not the second's.
+    await clock.tick(4000 - 400);
     expect(onCaptureTime).toHaveBeenCalledTimes(1);
   });
 
@@ -169,8 +212,8 @@ describe("lib/countdownSync#startCountdownSync", () => {
     await clock.tick(0); // flush the async handleReceived microtasks
 
     expect(broadcastCountdownStart).not.toHaveBeenCalled(); // this client never volunteered
-    // offsetMs = serverNow(6000) - now()(0) = 6000; localTargetEpoch = 10000 + 6000 = 16000
-    expect(onScheduled).toHaveBeenCalledWith(16000, 10000, 5000); // leadMs === 5000, the broadcaster's value — not this client's own 10000
+    // offsetMs = serverNow(6000) - now()(0) = 6000; localTargetEpoch = 10000 - 6000 = 4000
+    expect(onScheduled).toHaveBeenCalledWith(4000, 10000, 5000); // leadMs === 5000, the broadcaster's value — not this client's own 10000
 
     // Advancing past the (never-fired) jitter delay must still never trigger a volunteer broadcast.
     await clock.tick(400);
@@ -192,8 +235,8 @@ describe("lib/countdownSync#startCountdownSync", () => {
     );
 
     await clock.tick(0); // volunteers: serverTimestamp = 2000 + 5000 = 7000
-    // offsetMs = serverNow(2000) - localNowAtReading(0) = 2000; localTargetEpoch = 7000 + 2000 = 9000
-    expect(onScheduled).toHaveBeenCalledWith(9000, 7000, 5000);
+    // offsetMs = serverNow(2000) - localNowAtReading(0) = 2000; localTargetEpoch = 7000 - 2000 = 5000
+    expect(onScheduled).toHaveBeenCalledWith(5000, 7000, 5000);
 
     // A late straggler broadcast (e.g. another client's own jitter fired moments later).
     deliver({ serverTimestamp: 77777, leadMs: 3000 });
@@ -279,7 +322,7 @@ describe("lib/countdownSync#startCountdownSync", () => {
     // Another client's broadcast arrives afterward — still usable.
     deliver({ serverTimestamp: 6000, leadMs: 4000 });
     await clock.tick(0);
-    expect(onScheduled).toHaveBeenCalledWith(9000, 6000, 4000); // offsetMs = 3000 - 0
+    expect(onScheduled).toHaveBeenCalledWith(3000, 6000, 4000); // offsetMs = 3000 - 0; localTargetEpoch = 6000 - 3000
 
     consoleErrorSpy.mockRestore();
   });

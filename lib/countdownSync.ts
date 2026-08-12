@@ -146,7 +146,17 @@ export function startCountdownSync(
       jitterTimer = null;
     }
 
-    const localTargetEpoch = serverTimestamp + offsetMs;
+    // offsetMs estimates (serverClock - localClock) from a same-instant
+    // reading (see handleReceived/volunteer below), so converting a
+    // SERVER-clock value to this client's LOCAL clock means undoing that
+    // offset — subtracting, not adding. Adding it double-counts the skew:
+    // on one machine (local dev, client and server share a system clock)
+    // the offset is ~0 and the bug is invisible; against a real deployed
+    // server, adding it can land the target in the past whenever the
+    // client's clock runs even slightly ahead of the server's, and
+    // `Math.max(0, …)` below then fires capture immediately with no visible
+    // countdown.
+    const localTargetEpoch = serverTimestamp - offsetMs;
     callbacks.onScheduled(localTargetEpoch, serverTimestamp, roundLeadMs);
 
     const delayMs = Math.max(0, localTargetEpoch - now());
