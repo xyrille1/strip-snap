@@ -1,14 +1,15 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { checkRateLimit } from "@/lib/rateLimit";
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import {
   createSession,
   deleteSession,
   getSessionById,
   updateSessionFormat,
 } from "@/lib/db/sessions";
-import { deleteStripImage } from "@/lib/storage";
+import { createStrip } from "@/lib/db/strips";
+import { deleteStripImage, uploadStripImage } from "@/lib/storage";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 // A minimal valid 1x1 transparent PNG, base64-encoded (same fixture as
@@ -45,6 +46,15 @@ function stripsRequest(
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
+}
+
+function listStripsRequest(
+  sessionId: string | null,
+  headers: Record<string, string> = {}
+): NextRequest {
+  const url = new URL("http://localhost/api/strips");
+  if (sessionId !== null) url.searchParams.set("sessionId", sessionId);
+  return new NextRequest(url, { method: "GET", headers });
 }
 
 describe("POST /api/strips (integration, live local Supabase + Storage)", () => {
@@ -308,5 +318,133 @@ describe("POST /api/strips (integration, live local Supabase + Storage)", () => 
     expect(response.status).toBe(500);
     const body = await response.json();
     expect(body).toEqual({ error: "Failed to create strip" });
+  });
+});
+
+describe("GET /api/strips?sessionId= (integration, live local Supabase + Storage)", () => {
+  let sessionId: string | null = null;
+  let storagePaths: string[] = [];
+
+  beforeEach(() => {
+    mockedCheckRateLimit.mockResolvedValue({ success: true });
+  });
+
+  afterEach(async () => {
+    mockedCheckRateLimit.mockReset();
+
+    for (const path of storagePaths) {
+      await deleteStripImage(path).catch(() => undefined);
+    }
+    storagePaths = [];
+    if (sessionId) {
+      await deleteSession(sessionId); // cascades to strips rows
+      sessionId = null;
+    }
+  });
+
+  it("returns 400 when sessionId is missing or not a UUID", async () => {
+    const missing = await GET(listStripsRequest(null));
+    expect(missing.status).toBe(400);
+
+    const malformed = await GET(listStripsRequest("not-a-uuid"));
+    expect(malformed.status).toBe(400);
+  });
+
+  it("returns 404 when the session has no strips", async () => {
+    const session = await createSession({ mode: "solo", hostUserId: null });
+    sessionId = session.id;
+
+    const response = await GET(listStripsRequest(session.id));
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 404 for a session id that doesn't exist at all (same as a session with zero strips — no separate session lookup)", async () => {
+    const response = await GET(
+      listStripsRequest("00000000-0000-0000-0000-000000000000")
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("returns the strip with a fresh, working signed URL — the fallback OutputClient.tsx uses when sessionStorage's hand-off is missing", async () => {
+    const session = await createSession({ mode: "solo", hostUserId: null });
+    sessionId = session.id;
+
+    const stripId = crypto.randomUUID();
+    const storagePath = `strips/${session.id}/${stripId}.png`;
+    storagePaths.push(storagePath);
+    await uploadStripImage(storagePath, Buffer.from(ONE_PIXEL_PNG_DATA_URL.split(",")[1], "base64"));
+    const strip = await createStrip({
+      id: stripId,
+      sessionId: session.id,
+      stylePreset: "sepia",
+      storagePath,
+    });
+
+    const response = await GET(listStripsRequest(session.id));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.id).toBe(strip.id);
+    expect(body.sessionId).toBe(session.id);
+    expect(body.stylePreset).toBe("sepia");
+    expect(typeof body.signedUrl).toBe("string");
+
+    const fetched = await fetch(body.signedUrl);
+    expect(fetched.status).toBe(200);
+  });
+
+  it("returns only the most recently created strip when a session has more than one (each participant uploads their own; re-editing creates a new row)", async () => {
+    const session = await createSession({ mode: "invite", hostUserId: null });
+    sessionId = session.id;
+
+    const pngBytes = Buffer.from(ONE_PIXEL_PNG_DATA_URL.split(",")[1], "base64");
+
+    const olderPath = `strips/${session.id}/${crypto.randomUUID()}.png`;
+    storagePaths.push(olderPath);
+    await uploadStripImage(olderPath, pngBytes);
+    const older = await createStrip({
+      sessionId: session.id,
+      stylePreset: "classic_bw",
+      storagePath: olderPath,
+    });
+
+    // Distinct created_at ordering without a real-time sleep in the test.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const newerPath = `strips/${session.id}/${crypto.randomUUID()}.png`;
+    storagePaths.push(newerPath);
+    await uploadStripImage(newerPath, pngBytes);
+    const newer = await createStrip({
+      sessionId: session.id,
+      stylePreset: "high_contrast_mono",
+      storagePath: newerPath,
+    });
+
+    const response = await GET(listStripsRequest(session.id));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.id).toBe(newer.id);
+    expect(body.id).not.toBe(older.id);
+  });
+
+  it("returns 429 when the rate limiter denies the request", async () => {
+    mockedCheckRateLimit.mockResolvedValue({ success: false });
+
+    const response = await GET(
+      listStripsRequest("00000000-0000-0000-0000-000000000000")
+    );
+    expect(response.status).toBe(429);
+  });
+
+  it("keys the rate limiter by the request's client IP", async () => {
+    await GET(
+      listStripsRequest("00000000-0000-0000-0000-000000000000", {
+        "x-forwarded-for": "203.0.113.5, 70.41.3.18",
+      })
+    );
+
+    expect(mockedCheckRateLimit).toHaveBeenCalledWith(
+      expect.stringContaining("203.0.113.5"),
+      { limit: 60, windowSeconds: 60 * 60 }
+    );
   });
 });

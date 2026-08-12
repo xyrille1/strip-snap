@@ -96,3 +96,12 @@ export const stripIdParamSchema = z.object({
 });
 
 export type StripIdParamInput = z.infer<typeof stripIdParamSchema>;
+
+/** Validates the `?sessionId=` query param on GET /api/strips (lookup by session, not by strip id). */
+export const listStripsBySessionQuerySchema = z.object({
+  sessionId: z.string().uuid(),
+});
+
+export type ListStripsBySessionQueryInput = z.infer<
+  typeof listStripsBySessionQuerySchema
+>;
