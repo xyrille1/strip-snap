@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { STYLE_PRESETS, createStripSchema, stripIdParamSchema } from "./strip";
 
 describe("STYLE_PRESETS", () => {
-  it("is the locked set of 4 retro presets", () => {
+  it("is the locked set of 4 retro presets plus the original no-filter pass-through", () => {
     expect(STYLE_PRESETS).toEqual([
       "classic_bw",
       "sepia",
       "vintage_warm",
       "high_contrast_mono",
+      "original",
     ]);
   });
 });

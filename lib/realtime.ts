@@ -20,6 +20,14 @@ export interface PresenceState {
 export interface CountdownStartPayload {
   /** Epoch ms the capture should fire at — never trigger on broadcast receipt (TRD §3). */
   serverTimestamp: number;
+  /**
+   * The broadcasting client's currently-selected per-shot countdown duration
+   * (lib/countdownSync.ts's `LEAD_MS_OPTIONS`, e.g. 5000 or 10000). There is
+   * no "host" — every participant adopts whichever value the client that
+   * won the jitter-based election happened to have selected, discarding
+   * their own pick if it differed (see countdownSync.ts's doc comment).
+   */
+  leadMs: number;
 }
 
 export interface CaptureAckPayload {
